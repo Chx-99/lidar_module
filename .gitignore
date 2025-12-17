@@ -1,0 +1,52 @@
+# Prerequisites
+*.d
+
+*.pcd
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+**/cmake-build-debug/
+**/cmake-build-debug-event-trace/
+**/cmake-build-release/
+**/cmake-build-release-event-trace/
+/build
+/.idea/
+.cache
+.vscode/
+/install
+/log
+.clang-format
+compile_commands.json
+.cursor
+.claude
+.logs
+.clangd
+*.deb
+.DS_Store
+lib/watchDog/build
