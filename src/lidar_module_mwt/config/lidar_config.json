@@ -1,0 +1,12 @@
+{
+  "lidars": [
+    {
+      "connect_ip": "192.168.1.100",
+      "rate": 10,
+      "sn": "BAD8I539_ZWSCAN160"
+    }
+  ],
+  "multi_nic_mode": true,
+  "save_pcd": false ,
+  "alt_enable":false
+}
