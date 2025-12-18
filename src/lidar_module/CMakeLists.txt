@@ -11,6 +11,14 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     add_compile_options(-g)  # 启用调试信息
 endif()
 
+# 通过 FetchContent 获取 ConcurrentQueue
+include(FetchContent)
+FetchContent_Declare(
+  concurrentqueue
+  GIT_REPOSITORY https://github.com/cameron314/concurrentqueue.git
+  GIT_TAG master
+)
+FetchContent_MakeAvailable(concurrentqueue)
 
 # 查找所需的包
 find_package(ament_cmake REQUIRED)
@@ -41,12 +49,20 @@ add_executable(${executable_name} src/main.cpp)
 # 目标包含目录和链接
 target_include_directories(${executable_name} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>)
+  $<INSTALL_INTERFACE:include>
+  ${concurrentqueue_SOURCE_DIR}  # 添加 ConcurrentQueue 头文件路径
+)
 
 # 创建库
 add_library(lidar_lib
   src/lidar_module/lidar.cc
   src/broadcast_listener/broadcast_listener.cc
+)
+
+# 为库也添加包含目录
+target_include_directories(lidar_lib PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  ${concurrentqueue_SOURCE_DIR}  # 添加 ConcurrentQueue 头文件路径
 )
 
 # 链接目标库
@@ -77,7 +93,6 @@ ament_target_dependencies(${executable_name} ${dependencies})
 # 安装规则
 install(TARGETS ${executable_name}
   DESTINATION lib/${PROJECT_NAME})
-
 
 # 启用测试支持
 if(BUILD_TESTING)

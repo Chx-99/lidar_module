@@ -18,15 +18,8 @@
 
 #include "data_struct.h"
 
-/**
- * @brief 将自定义的数据帧转换为ROS 2的PointCloud2消息。
- *
- * 该函数接受一个包含单回波矩形数据的数据帧和一个时钟对象，将数据帧中的点云数据转换为PointCloud2消息。
- * 消息的时间戳使用传入的时钟对象获取，坐标系名称默认为"lidar_frame"，若提供sn则使用"lidar_"+sn。
- * @param data 包含单回波矩形数据的数据帧，数据帧大小为96。
- * @param clock 一个共享指针，指向rclcpp的时钟对象，用于获取时间戳。
- * @return sensor_msgs::msg::PointCloud2 转换后的PointCloud2消息。
- */
+
+// TODO: 未完成
 
 // ===================================chx修改部分===============================================
 inline sensor_msgs::msg::PointCloud2 convertToPointCloud2(

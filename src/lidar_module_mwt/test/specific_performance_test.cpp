@@ -42,27 +42,30 @@ void printVectorBinary(const std::vector<uint8_t>& vec) {
     std::cout << std::endl;
 }
 
+using namespace base_frame;
+using namespace frame_tools;
+
 int main()
 {
     std::cout << "=== 针对特定函数的性能对比测试 ===" << std::endl;
-    std::cout << "重点测试 get_ack_name_compile_time 函数和 TAG_MAP 查找性能\n"
+    std::cout << "重点测试 getAckNameCompileTime 函数和 TAG_MAP 查找性能\n"
               << std::endl;
 
     const int iterations = 1000000; // 一百万次迭代
 
-    // 测试新版本的 get_ack_name_compile_time 函数性能 (使用switch-case实现)
-    std::cout << ">>> 新版本 get_ack_name_compile_time 函数性能测试 <<<" << std::endl;
+    // 测试新版本的 getAckNameCompileTime 函数性能 (使用switch-case实现)
+    std::cout << ">>> 新版本 getAckNameCompileTime 函数性能测试 <<<" << std::endl;
 
     MEASURE_TIME(
-        volatile auto result = get_ack_name_compile_time(0x00, 0x01);
+        volatile auto result = getAckNameCompileTime(0x00, 0x01);
         , iterations, New_Version_get_ack_name_compile_time_HandShake)
 
     MEASURE_TIME(
-        volatile auto result = get_ack_name_compile_time(0x00, 0x03);
+        volatile auto result = getAckNameCompileTime(0x00, 0x03);
         , iterations, New_Version_get_ack_name_compile_time_HeartBeat)
 
     MEASURE_TIME(
-        volatile auto result = get_ack_name_compile_time(0x01, 0x08);
+        volatile auto result = getAckNameCompileTime(0x01, 0x08);
         , iterations, New_Version_get_ack_name_compile_time_IMU_Frequency)
 
     // 测试旧版本的 TAG_MAP 查找性能 (使用unordered_map实现)
@@ -84,17 +87,17 @@ int main()
     std::cout << "\n>>> 结果一致性验证 <<<" << std::endl;
 
     std::cout << "新版本 HandShake ACK 名称: "
-              << get_ack_name_compile_time(0x00, 0x01) << std::endl;
+              << getAckNameCompileTime(0x00, 0x01) << std::endl;
     std::cout << "旧版本 HandShake ACK 名称: "
               << old_version::TAG_MAP[std::make_tuple(0x01, 0x00, 0x01)] << std::endl;
 
     std::cout << "新版本 HeartBeat ACK 名称: "
-              << get_ack_name_compile_time(0x00, 0x03) << std::endl;
+              << getAckNameCompileTime(0x00, 0x03) << std::endl;
     std::cout << "旧版本 HeartBeat ACK 名称: "
               << old_version::TAG_MAP[std::make_tuple(0x01, 0x00, 0x03)] << std::endl;
 
     std::cout << "新版本 IMU Frequency ACK 名称: "
-              << get_ack_name_compile_time(0x01, 0x08) << std::endl;
+              << getAckNameCompileTime(0x01, 0x08) << std::endl;
     std::cout << "旧版本 IMU Frequency ACK 名称: "
               << old_version::TAG_MAP[std::make_tuple(0x01, 0x01, 0x08)] << std::endl;
 
@@ -128,6 +131,7 @@ int main()
 
     MEASURE_TIME(
         Frame<HandShake> frame("192.168.1.103", 55000, 45000, 65000);
+        FRAME_TO_VECTOR(frame);
         , iterations, New_Version_HandShake_Creation)
 
     MEASURE_TIME(
@@ -137,6 +141,7 @@ int main()
 
     MEASURE_TIME(
         Frame<HeartBeat> heart_n;
+        FRAME_TO_VECTOR(heart_n);
         , iterations, New_Version_HeartBeat_Creation)
 
     MEASURE_TIME(
