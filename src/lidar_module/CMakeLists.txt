@@ -55,7 +55,6 @@ target_include_directories(${executable_name} PUBLIC
 
 # 创建库
 add_library(lidar_lib
-  src/lidar_module/lidar.cc
   src/broadcast_listener/broadcast_listener.cc
 )
 
