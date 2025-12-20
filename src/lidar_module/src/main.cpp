@@ -36,11 +36,22 @@ int main(int argc, char **argv)
     // 创建work_guard保持io_context运行（全局管理）
     auto work_guard = boost::asio::make_work_guard(io_context);
 
+    const size_t thread_count = static_cast<size_t>(8);
+
     Lidar lidar(io_context, "192.168.1.139", "192.168.1.100", "SN123456", 10);
 
-    // 在后台线程运行io_context
-    std::thread io_thread([&io_context]()
-                          { io_context.run(); });
+    // 4. 启动线程池（在雷达创建后）
+    std::vector<std::thread> io_threads;
+    for (size_t i = 0; i < thread_count; ++i)
+    {
+        io_threads.emplace_back([&io_context, i]()
+                                {
+            // 可选：设置线程名方便调试
+            // pthread_setname_np(pthread_self(), 
+            //     ("IO-" + std::to_string(i)).c_str());
+            
+            io_context.run(); });
+    }
 
     // 等待io_context启动
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -55,7 +66,10 @@ int main(int argc, char **argv)
     {
         std::cerr << "雷达连接失败: " << e.what() << std::endl;
         io_context.stop();
-        io_thread.join();
+        for (auto &t : io_threads)
+        {
+            t.join();
+        }
         return 1;
     }
 
@@ -128,7 +142,10 @@ int main(int argc, char **argv)
 
     // 释放work_guard，允许io_context退出
     work_guard.reset();
-    io_thread.join();
-
+    // 等待所有线程
+    for (auto &t : io_threads)
+    {
+        t.join();
+    }
     return 0;
 }
