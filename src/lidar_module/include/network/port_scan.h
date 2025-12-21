@@ -21,6 +21,38 @@
 
 namespace network_tools {
 
+// 获取所有本地网卡的IPv4地址
+inline std::vector<std::tuple<std::string, std::string>> getAllLocalInterfaces() {
+    std::vector<std::tuple<std::string, std::string>> interfaces;  // <接口名, IP地址>
+
+    struct ifaddrs* ifaddr;
+    if (getifaddrs(&ifaddr) == -1) {
+        std::cerr << "获取网络接口失败" << std::endl;
+        return interfaces;
+    }
+
+    for (auto* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+        // 跳过无效地址、非IPv4地址
+        if (ifa->ifa_addr == nullptr || ifa->ifa_addr->sa_family != AF_INET) { continue; }
+
+        sockaddr_in* addr = reinterpret_cast<sockaddr_in*>(ifa->ifa_addr);
+        char ip_str[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &(addr->sin_addr), ip_str, INET_ADDRSTRLEN);
+
+        std::string ip(ip_str);
+        std::string iface_name(ifa->ifa_name);
+
+        // 跳过回环地址
+        if (ip.find("127.") == 0) { continue; }
+
+        interfaces.emplace_back(iface_name, ip);
+    }
+
+    freeifaddrs(ifaddr);
+    return interfaces;
+}
+
+
 // 根据IP地址查找对应的网络接口名称
 inline std::string getInterfaceNameFromIp(const std::string& ip_address) {
     // 预先将IP地址字符串转换为二进制
@@ -50,15 +82,8 @@ inline std::string getInterfaceNameFromIp(const std::string& ip_address) {
 }
 
 // 端口扫描函数
-// 参数:
-//   n: 需要获取的端口数量
-//   min_port: 最小端口号 (默认 48000)
-//   max_port: 最大端口号 (默认 54000)
-//   throw_on_insufficient: 如果找不到足够的端口是否抛出异常 (默认 true)
-// 返回: 可用端口列表
-// 异常: 如果 throw_on_insufficient=true 且找不到足够端口，抛出 std::runtime_error
 inline std::vector<std::uint16_t> getAvailablePorts(std::size_t n = 1, std::uint16_t min_port = 48000,
-                                                    std::uint16_t max_port = 54000, bool throw_on_insufficient = true) {
+                                                    std::uint16_t max_port = 54000) {
     if (n == 0) return {};
     if (min_port >= max_port) { throw std::invalid_argument("最小端口号必须小于最大端口号"); }
 
@@ -117,7 +142,7 @@ inline std::vector<std::uint16_t> getAvailablePorts(std::size_t n = 1, std::uint
     }
 
     // 如果找不到足够的端口，根据参数决定是否抛出异常
-    if (throw_on_insufficient && available_ports.size() < n) {
+    if (available_ports.size() < n) {
         throw std::runtime_error("无法找到足够的可用端口: 需要 " + std::to_string(n) + " 个，只找到 " +
                                  std::to_string(available_ports.size()) + " 个 (范围: " + std::to_string(min_port) +
                                  "-" + std::to_string(max_port) + ")");

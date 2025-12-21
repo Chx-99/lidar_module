@@ -38,6 +38,9 @@ public:
         try {
             auto ports = network_tools::getAvailablePorts(3);
             std::tie(cmd_port_, imu_port_, pointcloud_port_) = std::make_tuple(ports[0], ports[1], ports[2]);
+            std::cout << "为雷达 " << sn_ << " 分配端口: cmd=" << static_cast<int>(cmd_port_)
+                      << ", imu=" << static_cast<int>(imu_port_)
+                      << ", pointcloud=" << static_cast<int>(pointcloud_port_) << std::endl;
 
             // 绑定socket到对应端口 - cmd_socket绑定到本地IP和端口用于发送命令
             cmd_socket_.open(boost::asio::ip::udp::v4());
@@ -72,8 +75,9 @@ public:
             // 需要在io_context.run()启动后再调用connect()
         } catch (const boost::system::system_error& e) {
             std::cerr << "雷达 " << sn_ << " 初始化失败: " << e.what() << std::endl;
-            std::cerr << "详细信息: 本地IP=" << local_ip_ << ", 雷达IP=" << lidar_ip_ << ", cmd端口=" << cmd_port_
-                      << ", imu端口=" << imu_port_ << ", 点云端口=" << pointcloud_port_ << std::endl;
+            std::cerr << "详细信息: 本地IP=" << local_ip_ << ", 雷达IP=" << lidar_ip_
+                      << ", cmd端口=" << static_cast<int>(cmd_port_) << ", imu端口=" << static_cast<int>(imu_port_)
+                      << ", 点云端口=" << static_cast<int>(pointcloud_port_) << std::endl;
             throw;
         } catch (const std::exception& e) {
             std::cerr << "雷达 " << sn_ << " 初始化失败: " << e.what() << std::endl;
@@ -293,9 +297,9 @@ private:
     boost::asio::io_context& io_context_;  // ASIO上下文 所有雷达公用一个io_context
 
     // 端口句柄（RAII 管理，自动释放）
-    uint8_t cmd_port_;         // 命令端口
-    uint8_t pointcloud_port_;  // 数据端口
-    uint8_t imu_port_;         // IMU端口
+    uint16_t cmd_port_;         // 命令端口
+    uint16_t pointcloud_port_;  // 数据端口
+    uint16_t imu_port_;         // IMU端口
 
     // 网络组件（依赖 io_context 和端口）
     boost::asio::ip::udp::socket cmd_socket_;         // 用于接收与发送命令

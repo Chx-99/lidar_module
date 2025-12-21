@@ -8,13 +8,7 @@
 
 namespace memory_pool {
 /**
- * @brief 高性能无锁内存池，用于复用vector缓冲区
- *
- * 设计原则：
- * 1. 使用shared_ptr的引用计数机制自动管理生命周期
- * 2. 无锁设计，通过原子操作实现线程安全
- * 3. 自动降级机制，池满时自动创建新对象
- * 4. 保留capacity，减少内存重分配
+ * @brief 高性能无锁内存池
  *
  * @tparam T 缓冲区元素类型
  * @tparam PoolSize 池大小，建议设置为典型并发数的2-4倍

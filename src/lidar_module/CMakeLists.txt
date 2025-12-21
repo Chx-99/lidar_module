@@ -53,20 +53,8 @@ target_include_directories(${executable_name} PUBLIC
   ${concurrentqueue_SOURCE_DIR}  # 添加 ConcurrentQueue 头文件路径
 )
 
-# 创建库
-add_library(lidar_lib
-  src/broadcast_listener/broadcast_listener.cc
-)
-
-# 为库也添加包含目录
-target_include_directories(lidar_lib PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  ${concurrentqueue_SOURCE_DIR}  # 添加 ConcurrentQueue 头文件路径
-)
-
 # 链接目标库
 target_link_libraries(${executable_name}
-  lidar_lib
   ${PCL_LIBRARIES}
   ${Boost_LIBRARIES}
 )
