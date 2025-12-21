@@ -1,394 +1,129 @@
 // Port allocator - header-only, Boost-based, mutex-protected implementation
 #pragma once
 
+#include <arpa/inet.h>
 #include <boost/asio.hpp>
-
-#include <chrono>
-#include <condition_variable>
-#include <cstdint>
-#include <deque>
-#include <functional>
-#include <mutex>
-#include <random>
-#include <set>
-#include <stdexcept>
-#include <thread>
-#include <vector>
-#include <ifaddrs.h>
 #include <net/if.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
 
-namespace network_tools
-{
+#include <chrono>
+#include <cstdint>
+#include <functional>
+#include <ifaddrs.h>
+#include <random>
+#include <set>
+#include <string>
+#include <thread>
+#include <unordered_set>
+#include <vector>
 
-    // 根据IP地址查找对应的网络接口名称
-    inline std::string getInterfaceNameFromIp(const std::string &ip_address)
-    {
-        // 预先将IP地址字符串转换为二进制
-        struct in_addr target_addr;
-        if (inet_pton(AF_INET, ip_address.c_str(), &target_addr) != 1)
-        {
-            throw std::runtime_error("无效的IP地址格式: " + ip_address);
-        }
+// #define AUTO_PORT_MANAGER
 
-        struct ifaddrs *ifaddr;
-        if (getifaddrs(&ifaddr) == -1)
-        {
-            throw std::runtime_error("获取网络接口失败");
-        }
+namespace network_tools {
 
-        for (auto *ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next)
-        {
-            // 跳过无效地址和非IPv4地址
-            if (ifa->ifa_addr == nullptr || ifa->ifa_addr->sa_family != AF_INET)
-            {
-                continue;
-            }
-
-            sockaddr_in *addr = reinterpret_cast<sockaddr_in *>(ifa->ifa_addr);
-            // 直接比较二进制地址（32位整数比较），避免字符串转换和比较
-            if (addr->sin_addr.s_addr == target_addr.s_addr)
-            {
-                std::string interface_name(ifa->ifa_name);
-                freeifaddrs(ifaddr);
-                return interface_name;
-            }
-        }
-
-        freeifaddrs(ifaddr);
-        throw std::runtime_error("未找到与IP匹配的网络接口: " + ip_address);
+// 根据IP地址查找对应的网络接口名称
+inline std::string getInterfaceNameFromIp(const std::string& ip_address) {
+    // 预先将IP地址字符串转换为二进制
+    struct in_addr target_addr;
+    if (inet_pton(AF_INET, ip_address.c_str(), &target_addr) != 1) {
+        throw std::runtime_error("无效的IP地址格式: " + ip_address);
     }
 
-    // RAII 端口句柄
-    class PortHandle
-    {
-    public:
-        // PortHandle 持有一个被分配的端口号，以及一个可选的释放回调（RAII）
-        PortHandle() noexcept = default;
+    struct ifaddrs* ifaddr;
+    if (getifaddrs(&ifaddr) == -1) { throw std::runtime_error("获取网络接口失败"); }
 
-        PortHandle(std::uint16_t port, std::function<void(std::uint16_t)> release_cb)
-            : port_(port), release_cb_(std::move(release_cb)) {}
+    for (auto* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+        // 跳过无效地址和非IPv4地址
+        if (ifa->ifa_addr == nullptr || ifa->ifa_addr->sa_family != AF_INET) { continue; }
 
-        PortHandle(PortHandle &&other) noexcept
-        {
-            std::lock_guard<std::mutex> lk(other.m_);
-            port_ = other.port_;
-            release_cb_ = std::move(other.release_cb_);
-            other.port_ = 0;
+        sockaddr_in* addr = reinterpret_cast<sockaddr_in*>(ifa->ifa_addr);
+        // 直接比较二进制地址（32位整数比较），避免字符串转换和比较
+        if (addr->sin_addr.s_addr == target_addr.s_addr) {
+            std::string interface_name(ifa->ifa_name);
+            freeifaddrs(ifaddr);
+            return interface_name;
         }
+    }
 
-        PortHandle &operator=(PortHandle &&other) noexcept
-        {
-            if (this != &other)
-            {
-                release();
-                std::lock_guard<std::mutex> lk(other.m_);
-                port_ = other.port_;
-                release_cb_ = std::move(other.release_cb_);
-                other.port_ = 0;
-            }
-            return *this;
-        }
+    freeifaddrs(ifaddr);
+    throw std::runtime_error("未找到与IP匹配的网络接口: " + ip_address);
+}
 
-        // 非拷贝
-        PortHandle(const PortHandle &) = delete;
-        PortHandle &operator=(const PortHandle &) = delete;
+// 端口扫描函数
+// 参数:
+//   n: 需要获取的端口数量
+//   min_port: 最小端口号 (默认 48000)
+//   max_port: 最大端口号 (默认 54000)
+//   throw_on_insufficient: 如果找不到足够的端口是否抛出异常 (默认 true)
+// 返回: 可用端口列表
+// 异常: 如果 throw_on_insufficient=true 且找不到足够端口，抛出 std::runtime_error
+inline std::vector<std::uint16_t> getAvailablePorts(std::size_t n = 1, std::uint16_t min_port = 48000,
+                                                    std::uint16_t max_port = 54000, bool throw_on_insufficient = true) {
+    if (n == 0) return {};
+    if (min_port >= max_port) { throw std::invalid_argument("最小端口号必须小于最大端口号"); }
 
-        ~PortHandle() { release(); }
+    const std::size_t port_range = max_port - min_port + 1;
+    if (n > port_range) {
+        throw std::invalid_argument("请求的端口数量 (" + std::to_string(n) + ") 超过可用范围 (" +
+                                    std::to_string(port_range) + ")");
+    }
 
-        std::uint16_t port() const noexcept { return port_; }
+    std::vector<std::uint16_t> available_ports;
+    available_ports.reserve(n);
 
-        bool valid() const noexcept { return port_ != 0; }
+    // 创建临时的 io_context 用于端口检测
+    boost::asio::io_context io_ctx;
 
-        void release() noexcept
-        {
-            if (port_ != 0 && release_cb_)
-            {
-                try
-                {
-                    release_cb_(port_);
-                }
-                catch (...)
-                {
-                    // destructor must not throw
-                }
-                port_ = 0;
-            }
-        }
+    // 使用多个熵源来初始化随机数生成器，确保真正的随机性
+    std::random_device rd;
+    std::mt19937 rng(rd());
 
-    private:
-        mutable std::mutex m_;
-        std::uint16_t port_{0};
-        std::function<void(std::uint16_t)> release_cb_;
+    std::uniform_int_distribution<std::uint32_t> dist(min_port, max_port);
+    std::unordered_set<std::uint16_t> tried;     // 使用 unordered_set 提升查找性能
+    tried.reserve(std::min(n * 2, port_range));  // 预分配空间
+
+    // Lambda 函数：测试端口是否可用
+    auto test_port = [&io_ctx](std::uint16_t port) -> bool {
+        try {
+            boost::asio::ip::tcp::acceptor acceptor(io_ctx);
+            boost::asio::ip::tcp::endpoint ep(boost::asio::ip::tcp::v4(), port);
+            acceptor.open(ep.protocol());
+            acceptor.set_option(boost::asio::socket_base::reuse_address(true));
+            acceptor.bind(ep);
+            acceptor.close();
+            return true;
+        } catch (const std::exception&) { return false; }
     };
 
-    class BoostPortAllocator
-    {
-    public:
-        struct Config
-        {
-            std::uint16_t min_port = 48000;
-            std::uint16_t max_port = 54000;
-            std::size_t cache_size = 32;
-            std::chrono::milliseconds scan_interval{500};
-        };
+    // 先进行随机尝试，这样在端口较多可用时能快速找到
+    const std::size_t max_random_tries = std::min(port_range, n * 3);  // 限制随机尝试次数
+    while (available_ports.size() < n && tried.size() < max_random_tries) {
+        std::uint16_t port = static_cast<std::uint16_t>(dist(rng));
 
-        struct Stats
-        {
-            std::size_t allocated = 0;
-            std::size_t scans = 0;
-            std::size_t cache_size = 0;
-        };
+        // 跳过已经尝试过的端口
+        if (!tried.insert(port).second) continue;
 
-        // inline 单例访问（header-only 安全）
-        // 使用重载避免默认参数的成员初始化器问题
-        static BoostPortAllocator &instance()
-        {
-            static Config default_cfg;
-            static BoostPortAllocator inst(default_cfg);
-            return inst;
+        if (test_port(port)) { available_ports.push_back(port); }
+    }
+
+    // 如果随机尝试不够，进行线性扫描
+    if (available_ports.size() < n) {
+        for (std::uint16_t port = min_port; port <= max_port && available_ports.size() < n; ++port) {
+            // 已经尝试过的跳过
+            if (tried.count(port) > 0) continue;
+
+            if (test_port(port)) { available_ports.push_back(port); }
         }
+    }
 
-        static BoostPortAllocator &instance(const Config &cfg)
-        {
-            static BoostPortAllocator inst(cfg);
-            return inst;
-        }
+    // 如果找不到足够的端口，根据参数决定是否抛出异常
+    if (throw_on_insufficient && available_ports.size() < n) {
+        throw std::runtime_error("无法找到足够的可用端口: 需要 " + std::to_string(n) + " 个，只找到 " +
+                                 std::to_string(available_ports.size()) + " 个 (范围: " + std::to_string(min_port) +
+                                 "-" + std::to_string(max_port) + ")");
+    }
 
-        // 获取端口（RAII）
-        inline PortHandle acquire() { return acquire_impl(); }
+    return available_ports;
+}
 
-        // 批量获取
-        inline std::vector<PortHandle> acquireMultiple(std::size_t n)
-        {
-            std::vector<PortHandle> out;
-            out.reserve(n);
-            for (std::size_t i = 0; i < n; ++i)
-                out.push_back(acquire_impl());
-            return out;
-        }
-
-        inline Stats statistics() const
-        {
-            Stats s;
-            std::lock_guard<std::mutex> lk(mutex_);
-            s.allocated = allocated_;
-            s.scans = scans_;
-            s.cache_size = cache_.size();
-            return s;
-        }
-
-        // 显式释放（通常由 PortHandle 调用）
-        inline void release(std::uint16_t port)
-        {
-            if (port == 0)
-                return;
-            std::lock_guard<std::mutex> lk(mutex_);
-            // 归还时仅将端口放入已知集合，避免重复
-            if (used_.erase(port) > 0)
-            {
-                // 放回缓存尾部
-                if (cache_.size() < cfg_.cache_size)
-                    cache_.push_back(port);
-            }
-        }
-
-    private:
-        BoostPortAllocator(const Config &cfg)
-            : cfg_(cfg), rng_(std::random_device{}()), io_ctx_(), work_guard_(boost::asio::make_work_guard(io_ctx_))
-        {
-            // 启动后台线程池：一个线程用于 io_ctx（用于检查端口时的短期 acceptor）
-            bg_thread_ = std::thread([this]
-                                     { io_ctx_.run(); });
-
-            stopped_ = false;
-            scanner_thread_ = std::thread([this]
-                                          { scannerLoop(); });
-
-            // 初始填充
-            fillCache();
-        }
-
-        ~BoostPortAllocator()
-        {
-            {
-                std::lock_guard<std::mutex> lk(mutex_);
-                stopped_ = true;
-            }
-            cv_.notify_one();
-
-            if (scanner_thread_.joinable())
-                scanner_thread_.join();
-
-            work_guard_.reset();
-            io_ctx_.stop();
-            if (bg_thread_.joinable())
-                bg_thread_.join();
-        }
-
-        // 非拷贝
-        BoostPortAllocator(const BoostPortAllocator &) = delete;
-        BoostPortAllocator &operator=(const BoostPortAllocator &) = delete;
-
-        // 内部实现：尝试从缓存获取；若缓存空则直接扫描并返回
-        PortHandle acquire_impl()
-        {
-            std::uint16_t port = 0;
-            {
-                std::lock_guard<std::mutex> lk(mutex_);
-                if (!cache_.empty())
-                {
-                    port = cache_.front();
-                    cache_.pop_front();
-                    // 标记为已用
-                    used_.insert(port);
-                    allocated_++;
-                }
-            }
-
-            if (port == 0)
-            {
-                // 缓存空或者未命中，通过扫描直接获取
-                port = scanAndReservePort();
-                if (port == 0)
-                    throw std::runtime_error("no available port");
-            }
-
-            // 返回 PortHandle，析构时会调用 release
-            return PortHandle(port, [this](std::uint16_t p)
-                              { this->release(p); });
-        }
-
-        // 扫描并占用一个可用端口（真正 bind 后保留到 used_）
-        std::uint16_t scanAndReservePort()
-        {
-            std::uniform_int_distribution<std::uint32_t> dist(cfg_.min_port, cfg_.max_port);
-
-            // 尝试若干次随机采样，然后线性扫描
-            for (int attempt = 0; attempt < 8; ++attempt)
-            {
-                std::uint16_t p = static_cast<std::uint16_t>(dist(rng_));
-                if (tryBindAndReserve(p))
-                    return p;
-            }
-
-            // 线性扫描
-            for (std::uint16_t p = cfg_.min_port; p <= cfg_.max_port; ++p)
-            {
-                if (tryBindAndReserve(p))
-                    return p;
-            }
-            return 0;
-        }
-
-        bool tryBindAndReserve(std::uint16_t port)
-        {
-            // 快速检查：是否已被本进程使用
-            {
-                std::lock_guard<std::mutex> lk(mutex_);
-                if (used_.count(port) > 0)
-                    return false;
-            }
-
-            // 采用 Boost.Asio 尝试绑定短期 acceptor；成功则保留端口
-            try
-            {
-                boost::asio::ip::tcp::acceptor acceptor(io_ctx_);
-                boost::asio::ip::tcp::endpoint ep(boost::asio::ip::tcp::v4(), port);
-                acceptor.open(ep.protocol());
-                acceptor.set_option(boost::asio::socket_base::reuse_address(true));
-                acceptor.bind(ep);
-
-                // 绑定成功，立即关闭 acceptor BUT 为了防止 race，我们将端口标记为 used_
-                {
-                    std::lock_guard<std::mutex> lk(mutex_);
-                    if (used_.count(port) > 0)
-                        return false; // double-check
-                    used_.insert(port);
-                    allocated_++;
-                }
-
-                acceptor.close();
-                return true;
-            }
-            catch (const std::exception &)
-            {
-                return false;
-            }
-        }
-
-        void fillCache()
-        {
-            std::vector<std::uint16_t> found;
-            found.reserve(cfg_.cache_size);
-
-            // 随机尝试，避免长时间阻塞
-            for (std::size_t i = 0; i < cfg_.cache_size * 2 && found.size() < cfg_.cache_size; ++i)
-            {
-                std::uint16_t p = static_cast<std::uint16_t>(
-                    std::uniform_int_distribution<std::uint32_t>(cfg_.min_port, cfg_.max_port)(rng_));
-                if (tryBindAndReserve(p))
-                {
-                    found.push_back(p);
-                }
-            }
-
-            // 将找到的端口加入缓存（已在 tryBindAndReserve 中被标记为 used_）
-            if (!found.empty())
-            {
-                std::lock_guard<std::mutex> lk(mutex_);
-                for (auto p : found)
-                {
-                    if (cache_.size() < cfg_.cache_size)
-                        cache_.push_back(p);
-                }
-                scans_++;
-            }
-        }
-
-        void scannerLoop()
-        {
-            while (true)
-            {
-                std::unique_lock<std::mutex> lk(mutex_);
-                if (cv_.wait_for(lk, cfg_.scan_interval,
-                                 [this]
-                                 { return stopped_ || cache_.size() < cfg_.cache_size / 2; }))
-                {
-                    if (stopped_)
-                        break;
-                }
-                // release lock while filling to avoid blocking acquire
-                lk.unlock();
-                fillCache();
-            }
-        }
-
-    private:
-        Config cfg_;
-        mutable std::mutex mutex_;
-        std::condition_variable cv_;
-
-        // 缓存与使用集合
-        std::deque<std::uint16_t> cache_;
-        std::set<std::uint16_t> used_;
-
-        // 状态
-        std::size_t allocated_{0};
-        std::size_t scans_{0};
-        bool stopped_{false};
-
-        // 随机数
-        std::mt19937 rng_;
-
-        // 后台线程
-        std::thread scanner_thread_;
-
-        // Boost.Asio 用于绑定尝试
-        boost::asio::io_context io_ctx_;
-        boost::asio::executor_work_guard<boost::asio::io_context::executor_type> work_guard_;
-        std::thread bg_thread_;
-    };
-
-} // namespace network_tools
+};  // namespace network_tools

@@ -14,6 +14,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <tuple>
 
 namespace lidar_module {
 using namespace base_frame;
@@ -26,9 +27,6 @@ public:
           local_ip_(std::move(local_ip)),
           sn_(std::move(sn)),
           io_context_(io_context),
-          cmd_port_(network_tools::BoostPortAllocator::instance().acquire()),
-          pointcloud_port_(network_tools::BoostPortAllocator::instance().acquire()),
-          imu_port_(network_tools::BoostPortAllocator::instance().acquire()),
           cmd_socket_(io_context),
           imu_socket_(io_context),
           pointcloud_socket_(io_context),
@@ -36,19 +34,21 @@ public:
           ack_producer_token_(SharedQueues::instance().ackQueue()),
           pointcloud_producer_token_(SharedQueues::instance().pointCloudQueue()),
           imu_producer_token_(SharedQueues::instance().imuQueue()) {
+        // 分配端口
         try {
+            auto ports = network_tools::getAvailablePorts(3);
+            std::tie(cmd_port_, imu_port_, pointcloud_port_) = std::make_tuple(ports[0], ports[1], ports[2]);
+
             // 绑定socket到对应端口 - cmd_socket绑定到本地IP和端口用于发送命令
             cmd_socket_.open(boost::asio::ip::udp::v4());
-            cmd_socket_.bind(
-                boost::asio::ip::udp::endpoint(boost::asio::ip::make_address_v4(local_ip_), cmd_port_.port()));
+            cmd_socket_.bind(boost::asio::ip::udp::endpoint(boost::asio::ip::make_address_v4(local_ip_), cmd_port_));
 
             // imu和pointcloud socket只需要绑定到端口即可（接收数据）
             imu_socket_.open(boost::asio::ip::udp::v4());
-            imu_socket_.bind(boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), imu_port_.port()));
+            imu_socket_.bind(boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), imu_port_));
 
             pointcloud_socket_.open(boost::asio::ip::udp::v4());
-            pointcloud_socket_.bind(
-                boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), pointcloud_port_.port()));
+            pointcloud_socket_.bind(boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v4(), pointcloud_port_));
 
             remote_endpoint_ = boost::asio::ip::udp::endpoint(boost::asio::ip::make_address_v4(lidar_ip_), 65000);
 
@@ -72,9 +72,8 @@ public:
             // 需要在io_context.run()启动后再调用connect()
         } catch (const boost::system::system_error& e) {
             std::cerr << "雷达 " << sn_ << " 初始化失败: " << e.what() << std::endl;
-            std::cerr << "详细信息: 本地IP=" << local_ip_ << ", 雷达IP=" << lidar_ip_
-                      << ", cmd端口=" << cmd_port_.port() << ", imu端口=" << imu_port_.port()
-                      << ", 点云端口=" << pointcloud_port_.port() << std::endl;
+            std::cerr << "详细信息: 本地IP=" << local_ip_ << ", 雷达IP=" << lidar_ip_ << ", cmd端口=" << cmd_port_
+                      << ", imu端口=" << imu_port_ << ", 点云端口=" << pointcloud_port_ << std::endl;
             throw;
         } catch (const std::exception& e) {
             std::cerr << "雷达 " << sn_ << " 初始化失败: " << e.what() << std::endl;
@@ -89,8 +88,7 @@ public:
         startReceiveAck();
 
         // 1. 发送握手指令并等待ACK
-        base_frame::Frame<base_frame::HandShake> handshake_frame(local_ip_, pointcloud_port_.port(), cmd_port_.port(),
-                                                                 imu_port_.port());
+        base_frame::Frame<base_frame::HandShake> handshake_frame(local_ip_, pointcloud_port_, cmd_port_, imu_port_);
         sendCommandAndWaitAck(FRAME_TO_SPAN(handshake_frame), "握手");
 
         // 2. 发送开启激光指令并等待ACK
@@ -295,9 +293,9 @@ private:
     boost::asio::io_context& io_context_;  // ASIO上下文 所有雷达公用一个io_context
 
     // 端口句柄（RAII 管理，自动释放）
-    network_tools::PortHandle cmd_port_;         // 命令端口
-    network_tools::PortHandle pointcloud_port_;  // 数据端口
-    network_tools::PortHandle imu_port_;         // IMU端口
+    uint8_t cmd_port_;         // 命令端口
+    uint8_t pointcloud_port_;  // 数据端口
+    uint8_t imu_port_;         // IMU端口
 
     // 网络组件（依赖 io_context 和端口）
     boost::asio::ip::udp::socket cmd_socket_;         // 用于接收与发送命令
