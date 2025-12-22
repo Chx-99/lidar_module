@@ -16,7 +16,7 @@
 #include <mutex>
 #include <tuple>
 
-namespace lidar_module {
+namespace lidar_base {
 using namespace base_frame;
 using namespace free_queue;
 
@@ -30,10 +30,17 @@ public:
           cmd_socket_(io_context),
           imu_socket_(io_context),
           pointcloud_socket_(io_context),
-          heartbeat_timer_(io_context),
-          ack_producer_token_(SharedQueues::instance().ackQueue()),
-          pointcloud_producer_token_(SharedQueues::instance().pointCloudQueue()),
-          imu_producer_token_(SharedQueues::instance().imuQueue()) {
+          heartbeat_timer_(io_context) {
+        // 注册雷达，获取独立队列
+        queues_ = QueueManager::instance().registerLidar(sn_);
+        
+        // 初始化ProducerToken（提升入队性能）
+        ack_producer_token_ = std::make_unique<moodycamel::ProducerToken>(queues_->ack_queue);
+        pointcloud_producer_token_ = std::make_unique<moodycamel::ProducerToken>(queues_->pointcloud_queue);
+        imu_producer_token_ = std::make_unique<moodycamel::ProducerToken>(queues_->imu_queue);
+        
+        std::cout << "雷达 " << sn_ << " 已注册队列" << std::endl;
+        
         // 分配端口
         try {
             auto ports = network_tools::getAvailablePorts(3);
@@ -84,7 +91,9 @@ public:
             throw;
         }
     }
-    ~Lidar() { disconnect(); }
+    ~Lidar() {
+        disconnect();
+    }
 
     // 连接雷达
     void connect() {
@@ -120,6 +129,9 @@ public:
         imu_socket_.close();
         pointcloud_socket_.close();
         ack_recv_buffer_.clear();
+
+        // 注销雷达队列
+        QueueManager::instance().unregisterLidar(sn_);
     }
 
     // 发送指令帧
@@ -233,7 +245,7 @@ private:
         // 立即拷贝数据到队列，避免缓冲区被覆盖导致数据错误
         AckPacket packet{.sn = sn_, .data = std::vector<uint8_t>(data.begin(), data.end())};
         // 使用ProducerToken提高性能
-        SharedQueues::instance().ackQueue().enqueue(ack_producer_token_, std::move(packet));
+        queues_->ack_queue.enqueue(*ack_producer_token_, std::move(packet));
     }
 
     // 点云接收（直接用内存池buffer接收，零拷贝）
@@ -254,7 +266,7 @@ private:
 
                     // 直接入队，零拷贝传递（shared_ptr）
                     PointCloudPacket packet{.sn = sn_, .data = buffer};
-                    SharedQueues::instance().pointCloudQueue().enqueue(pointcloud_producer_token_, std::move(packet));
+                    queues_->pointcloud_queue.enqueue(*pointcloud_producer_token_, std::move(packet));
                 }
 
                 if (pointcloud_socket_.is_open()) { startReceivePointCloud(); }
@@ -279,8 +291,7 @@ private:
 
                                                // 直接入队，零拷贝传递（shared_ptr）
                                                IMUPacket packet{.sn = sn_, .data = buffer};
-                                               SharedQueues::instance().imuQueue().enqueue(imu_producer_token_,
-                                                                                           std::move(packet));
+                                               queues_->imu_queue.enqueue(*imu_producer_token_, std::move(packet));
                                            }
 
                                            if (imu_socket_.is_open()) { startReceiveIMU(); }
@@ -320,10 +331,13 @@ private:
     std::mutex init_mutex_;
     std::function<void(bool)> init_ack_callback_;
 
-    // 无锁队列生产者令牌（提高性能）
-    moodycamel::ProducerToken ack_producer_token_;
-    moodycamel::ProducerToken pointcloud_producer_token_;
-    moodycamel::ProducerToken imu_producer_token_;
+    // 独立队列引用（由QueueManager管理）
+    std::shared_ptr<LidarQueues> queues_;
+
+    // ProducerToken（提升入队性能，需要在获取队列后初始化）
+    std::unique_ptr<moodycamel::ProducerToken> ack_producer_token_;
+    std::unique_ptr<moodycamel::ProducerToken> pointcloud_producer_token_;
+    std::unique_ptr<moodycamel::ProducerToken> imu_producer_token_;
 
     // 内存池（零拷贝传递，避免频繁堆分配）
     memory_pool::BufferPool<uint8_t, 32> pointcloud_buffer_pool_;  // 点云数据内存池（大包，高频）
@@ -333,4 +347,4 @@ private:
     // 运行状态
     std::atomic<bool> is_running_{false};
 };
-};  // namespace lidar_module
+};  // namespace lidar_base

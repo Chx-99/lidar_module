@@ -57,6 +57,7 @@ target_include_directories(${executable_name} PUBLIC
 target_link_libraries(${executable_name}
   ${PCL_LIBRARIES}
   ${Boost_LIBRARIES}
+  atomic  # C++20 atomic shared_ptr support
 )
 
 # 设置编译选项

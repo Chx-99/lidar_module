@@ -3,6 +3,7 @@
 #include "lidar/lidar_base.h"
 #include "lidar/lidar_scan.h"
 #include "network/port_scan.h"
+#include "process/process_worker.h"
 #include "queue/data_queue.h"
 
 #include <chrono>
@@ -11,21 +12,12 @@
 #include <thread>
 #include <vector>
 
-using namespace std::chrono;
-
-// 定义时间测量宏
-#define MEASURE_TIME(operation, iterations, name)                                                               \
-    auto start_##name = high_resolution_clock::now();                                                           \
-    for (int i = 0; i < iterations; ++i) { operation; }                                                         \
-    auto end_##name = high_resolution_clock::now();                                                             \
-    auto duration_##name = duration_cast<nanoseconds>(end_##name - start_##name);                               \
-    std::cout << #name << " (" << iterations << " iterations) 执行时间: " << duration_##name.count() << " 纳秒" \
-              << std::endl;                                                                                     \
-    std::cout << "平均每次执行时间: " << duration_##name.count() / iterations << " 纳秒" << std::endl;
-
-using namespace lidar_module;
+using namespace lidar_base;
+using namespace lidar_scanner;
 using namespace base_frame;
 using namespace frame_tools;
+using namespace free_queue;
+using namespace process_worker;
 
 int main(int /* argc */, char** /* argv */) {
     boost::asio::io_context io_context;
@@ -33,12 +25,12 @@ int main(int /* argc */, char** /* argv */) {
     // 创建work_guard保持io_context运行（全局管理）
     auto work_guard = boost::asio::make_work_guard(io_context);
 
-
-    lidar_module::LidarScanner scanner(5);
+    
+    LidarScanner scanner(5);
     auto lidars = scanner.searchLidar();
 
     // 使用智能指针管理 Lidar 对象（Lidar 包含不可复制的成员如 socket、mutex）
-    std::vector<std::unique_ptr<Lidar>> lidar_devices;
+    std::vector<std::unique_ptr<lidar_base::Lidar>> lidar_devices;
 
     // 遍历所有雷达
     for (const auto& [sn, info] : lidars) {
@@ -94,84 +86,69 @@ int main(int /* argc */, char** /* argv */) {
         return 1;
     }
 
-    // 启动消费者线程处理ACK队列
-    std::atomic<bool> running{true};
-    std::thread consumer_thread([&running]() {
-        auto& ack_queue = free_queue::SharedQueues::instance().ackQueue();
-        while (running.load()) {
-            free_queue::AckPacket packet;
-            if (ack_queue.try_dequeue(packet)) {
-                auto ack_tab = getAckNameCompileTime(GET_ACK_SET(packet.data.data()), GET_ACK_ID(packet.data.data()));
+    // 创建线程池处理器（根据雷达数量动态计算处理线程数）
+    // 策略：每5-10台雷达分配1个处理线程，上限8个线程
+    size_t processor_thread_count = std::max<size_t>(1, std::min<size_t>(8, (lidar_count + 9) / 10));
+    std::cout << "创建 " << processor_thread_count << " 个数据处理线程" << std::endl;
+    
+    ProcessorThreadPool processor(processor_thread_count);
 
-                // 使用if-else替代switch，因为ack_tab是字符串
-                if (ack_tab == "HandShake ACK") {
-                    HandShakeACK handshake = fromVector<HandShakeACK>(packet.data);
-                    std::cout << "收到 HandShake ACK: " << handshake << std::endl;
-                } else if (ack_tab == "HeartBeat ACK") {
-                    // HeartBeatACK heartbeat = fromVector<HeartBeatACK>(packet.data);
-                    // std::cout << "收到 HeartBeat ACK: " << heartbeat << std::endl;
-                } else if (ack_tab == "SetLaserStatus ACK") {
-                    SetLaserStatusACK set_laser_status = fromVector<SetLaserStatusACK>(packet.data);
-                    std::cout << "收到 SetLaserStatus ACK: " << set_laser_status << std::endl;
-                } else if (ack_tab == "Set IMU Frequency ACK") {
-                    SetIMUFrequencyACK set_imu_frequency = fromVector<SetIMUFrequencyACK>(packet.data);
-                    std::cout << "收到 Set IMU Frequency ACK: " << set_imu_frequency << std::endl;
-                } else {
-                    std::cout << "收到未知 ACK/MSG" << std::endl;
-                }
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-            }
+    // 设置ACK处理回调
+    processor.setAckCallback([](const std::string& sn, const AckPacket& packet) {
+        auto ack_tab = getAckNameCompileTime(GET_ACK_SET(packet.data.data()), GET_ACK_ID(packet.data.data()));
+
+        // 使用if-else替代switch，因为ack_tab是字符串
+        if (ack_tab == "HandShake ACK") {
+            HandShakeACK handshake = fromVector<HandShakeACK>(packet.data);
+            std::cout << "[" << sn << "] 收到 HandShake ACK: " << handshake << std::endl;
+        } else if (ack_tab == "HeartBeat ACK") {
+            // HeartBeatACK heartbeat = fromVector<HeartBeatACK>(packet.data);
+            // std::cout << "[" << sn << "] 收到 HeartBeat ACK: " << heartbeat << std::endl;
+        } else if (ack_tab == "SetLaserStatus ACK") {
+            SetLaserStatusACK set_laser_status = fromVector<SetLaserStatusACK>(packet.data);
+            std::cout << "[" << sn << "] 收到 SetLaserStatus ACK: " << set_laser_status << std::endl;
+        } else if (ack_tab == "Set IMU Frequency ACK") {
+            SetIMUFrequencyACK set_imu_frequency = fromVector<SetIMUFrequencyACK>(packet.data);
+            std::cout << "[" << sn << "] 收到 Set IMU Frequency ACK: " << set_imu_frequency << std::endl;
+        } else {
+            std::cout << "[" << sn << "] 收到未知 ACK/MSG" << std::endl;
         }
     });
 
-    // 消费点云线程
-    std::thread pointcloud_consumer_thread([&running]() {
-        auto& pointcloud_queue = free_queue::SharedQueues::instance().pointCloudQueue();
-        while (running.load()) {
-            free_queue::PointCloudPacket packet;
-            if (pointcloud_queue.try_dequeue(packet)) {
-                // 处理点云数据（使用shared_ptr，零拷贝）
-                // std::cout << "收到点云数据包，大小: " << packet.data->size() << " 字节" << std::endl;
-                // 处理完毕后，packet.data析构，引用计数-1
-                // 如果引用计数归1，内存池可以复用该缓冲区
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
-        }
+    // 设置点云处理回调
+    processor.setPointCloudCallback([](const std::string& sn, const PointCloudPacket& packet) {
+        // 处理点云数据（使用shared_ptr，零拷贝）
+        // std::cout << "[" << sn << "] 收到点云数据包，大小: " << packet.data->size() << " 字节" << std::endl;
+        // 在这里添加你的点云处理算法
     });
 
-    // 消费IMU线程
-    std::thread imu_consumer_thread([&running]() {
-        auto& imu_queue = free_queue::SharedQueues::instance().imuQueue();
-        while (running.load()) {
-            free_queue::IMUPacket packet;
-            if (imu_queue.try_dequeue(packet)) {
-                // 处理IMU数据（使用shared_ptr，零拷贝）
-                // std::cout << "收到IMU数据包，大小: " << packet.data->size() << " 字节" << std::endl;
-                // 处理完毕后，packet.data析构，引用计数-1
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(5));
-            }
-        }
+    // 设置IMU处理回调
+    processor.setIMUCallback([](const std::string& sn, const IMUPacket& packet) {
+        // 处理IMU数据（使用shared_ptr，零拷贝）
+        // std::cout << "[" << sn << "] 收到IMU数据包，大小: " << packet.data->size() << " 字节" << std::endl;
+        // 在这里添加你的IMU处理算法
     });
+
+    // 启动线程池
+    processor.start();
 
     // 等待用户中断
     std::cout << "按Enter键退出..." << std::endl;
     std::cin.get();
 
-    running.store(false);
+    // 停止线程池
+    processor.stop();
 
     // 断开所有雷达连接
     for (auto& lidar : lidar_devices) {
         lidar->disconnect();  // 使用 -> 因为是指针
     }
 
-    consumer_thread.join();
-    pointcloud_consumer_thread.join();
-    imu_consumer_thread.join();  // 释放work_guard，允许io_context退出
+    // 释放work_guard，允许io_context退出
     work_guard.reset();
-    // 等待所有线程
+    
+    // 等待所有IO线程
     for (auto& t : io_threads) { t.join(); }
+    
     return 0;
 }

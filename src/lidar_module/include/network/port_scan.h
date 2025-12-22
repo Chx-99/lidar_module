@@ -14,6 +14,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -21,14 +22,14 @@
 
 namespace network_tools {
 
-// 获取所有本地网卡的IPv4地址
-inline std::vector<std::tuple<std::string, std::string>> getAllLocalInterfaces() {
-    std::vector<std::tuple<std::string, std::string>> interfaces;  // <接口名, IP地址>
+// 获取所有本地网卡的IPv4地址（按网卡接口分组）
+inline std::vector<std::tuple<std::string, std::vector<std::string>>> getAllLocalInterfaces() {
+    std::unordered_map<std::string, std::vector<std::string>> interface_map;  // <接口名, IP地址列表>
 
     struct ifaddrs* ifaddr;
     if (getifaddrs(&ifaddr) == -1) {
         std::cerr << "获取网络接口失败" << std::endl;
-        return interfaces;
+        return {};
     }
 
     for (auto* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
@@ -45,10 +46,19 @@ inline std::vector<std::tuple<std::string, std::string>> getAllLocalInterfaces()
         // 跳过回环地址
         if (ip.find("127.") == 0) { continue; }
 
-        interfaces.emplace_back(iface_name, ip);
+        // 将IP添加到对应接口的列表中
+        interface_map[iface_name].push_back(ip);
     }
 
     freeifaddrs(ifaddr);
+
+    // 转换为 vector 返回
+    std::vector<std::tuple<std::string, std::vector<std::string>>> interfaces;
+    interfaces.reserve(interface_map.size());
+    for (auto& [iface_name, ip_list] : interface_map) {
+        interfaces.emplace_back(iface_name, std::move(ip_list));
+    }
+
     return interfaces;
 }
 
