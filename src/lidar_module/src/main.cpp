@@ -3,7 +3,7 @@
 #include "lidar/lidar_base.h"
 #include "lidar/lidar_scan.h"
 #include "network/port_scan.h"
-#include "process/process_worker.h"
+#include "process/data_analysis.h"
 #include "queue/data_queue.h"
 
 #include <chrono>
@@ -91,46 +91,60 @@ int main(int /* argc */, char** /* argv */) {
     size_t processor_thread_count = std::max<size_t>(1, std::min<size_t>(8, (lidar_count + 9) / 10));
     std::cout << "创建 " << processor_thread_count << " 个数据处理线程" << std::endl;
     
-    ProcessorThreadPool processor(processor_thread_count);
+    ProcessorThreadPool processor;
 
     // 设置ACK处理回调
-    processor.setAckCallback([](const std::string& sn, const AckPacket& packet) {
-        auto ack_tab = getAckNameCompileTime(GET_ACK_SET(packet.data.data()), GET_ACK_ID(packet.data.data()));
+    processor.setAckCallback([](const std::string &sn, const std::vector<uint8_t> &data) {
+        auto ack_tab = getAckNameCompileTime(GET_ACK_SET(data.data()), GET_ACK_ID(data.data()));
 
         // 使用if-else替代switch，因为ack_tab是字符串
         if (ack_tab == "HandShake ACK") {
-            HandShakeACK handshake = fromVector<HandShakeACK>(packet.data);
+            HandShakeACK handshake = fromVector<HandShakeACK>(data);
             std::cout << "[" << sn << "] 收到 HandShake ACK: " << handshake << std::endl;
         } else if (ack_tab == "HeartBeat ACK") {
             // HeartBeatACK heartbeat = fromVector<HeartBeatACK>(packet.data);
             // std::cout << "[" << sn << "] 收到 HeartBeat ACK: " << heartbeat << std::endl;
         } else if (ack_tab == "SetLaserStatus ACK") {
-            SetLaserStatusACK set_laser_status = fromVector<SetLaserStatusACK>(packet.data);
+            SetLaserStatusACK set_laser_status = fromVector<SetLaserStatusACK>(data);
             std::cout << "[" << sn << "] 收到 SetLaserStatus ACK: " << set_laser_status << std::endl;
         } else if (ack_tab == "Set IMU Frequency ACK") {
-            SetIMUFrequencyACK set_imu_frequency = fromVector<SetIMUFrequencyACK>(packet.data);
+            SetIMUFrequencyACK set_imu_frequency = fromVector<SetIMUFrequencyACK>(data);
             std::cout << "[" << sn << "] 收到 Set IMU Frequency ACK: " << set_imu_frequency << std::endl;
         } else {
             std::cout << "[" << sn << "] 收到未知 ACK/MSG" << std::endl;
         }
     });
 
-    // 设置点云处理回调
-    processor.setPointCloudCallback([](const std::string& sn, const PointCloudPacket& packet) {
-        // 处理点云数据（使用shared_ptr，零拷贝）
-        // std::cout << "[" << sn << "] 收到点云数据包，大小: " << packet.data->size() << " 字节" << std::endl;
+    // 设置点云处理回调（优化内存管理）
+    processor.setPointCloudBatchCallback([](const std::string &sn, const std::vector<std::shared_ptr<std::vector<uint8_t>>> &batch) {
+        // 使用局部变量而非thread_local，每次自动释放
+        std::vector<SingleEchoRectangularData> pointcloud_points;
+        pointcloud_points.reserve(batch.size() * 100);  // 预估容量，仅本次使用
+        
+        for (const auto& pc_ptr : batch) {
+            auto frame = fromVector<dataFrame<SingleEchoRectangularData>>( *pc_ptr );
+            pointcloud_points.insert(pointcloud_points.end(), frame.datas.begin(), frame.datas.end());
+        }
+        
         // 在这里添加你的点云处理算法
+        // std::cout << "[" << sn << "] 处理点云: " << pointcloud_points.size() << " 点" << std::endl;
+        
+        // 函数结束时自动释放内存
     });
 
     // 设置IMU处理回调
-    processor.setIMUCallback([](const std::string& sn, const IMUPacket& packet) {
+    processor.setIMUCallback([](const std::string &sn, const std::vector<uint8_t> &data) {
         // 处理IMU数据（使用shared_ptr，零拷贝）
-        // std::cout << "[" << sn << "] 收到IMU数据包，大小: " << packet.data->size() << " 字节" << std::endl;
+        // std::cout << "[" << sn << "] 收到IMU数据包，大小: " << data.size() << " 字节" << std::endl;
         // 在这里添加你的IMU处理算法
+        auto imu_frame = fromVector<dataFrame<ImuData>>(data);
+        // std::cout << "[" << sn << "] 处理完成IMU数据，时间戳: " << imu_frame.timestamp << std::endl;
     });
 
     // 启动线程池
     processor.start();
+
+
 
     // 等待用户中断
     std::cout << "按Enter键退出..." << std::endl;

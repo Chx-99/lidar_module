@@ -242,9 +242,9 @@ private:
     }
 
     void pushAckToQueue(std::span<const uint8_t> data) {
-        // 立即拷贝数据到队列，避免缓冲区被覆盖导致数据错误
-        AckPacket packet{.sn = sn_, .data = std::vector<uint8_t>(data.begin(), data.end())};
-        // 使用ProducerToken提高性能
+        // 创建shared_ptr包装数据
+        auto packet = std::make_shared<std::vector<uint8_t>>(data.begin(), data.end());
+        // 使用ProducerToken提高性能，enqueue会自动唤醒等待线程
         queues_->ack_queue.enqueue(*ack_producer_token_, std::move(packet));
     }
 
@@ -264,9 +264,8 @@ private:
                     // 调整buffer到实际接收的大小
                     buffer->resize(bytes_received);
 
-                    // 直接入队，零拷贝传递（shared_ptr）
-                    PointCloudPacket packet{.sn = sn_, .data = buffer};
-                    queues_->pointcloud_queue.enqueue(*pointcloud_producer_token_, std::move(packet));
+                    // 直接入队，零拷贝传递（shared_ptr），enqueue会自动唤醒等待线程
+                    queues_->pointcloud_queue.enqueue(*pointcloud_producer_token_, buffer);
                 }
 
                 if (pointcloud_socket_.is_open()) { startReceivePointCloud(); }
@@ -289,9 +288,8 @@ private:
                                                // 调整buffer到实际接收的大小
                                                buffer->resize(bytes_received);
 
-                                               // 直接入队，零拷贝传递（shared_ptr）
-                                               IMUPacket packet{.sn = sn_, .data = buffer};
-                                               queues_->imu_queue.enqueue(*imu_producer_token_, std::move(packet));
+                                               // 直接入队，零拷贝传递（shared_ptr），enqueue会自动唤醒等待线程
+                                               queues_->imu_queue.enqueue(*imu_producer_token_, buffer);
                                            }
 
                                            if (imu_socket_.is_open()) { startReceiveIMU(); }
