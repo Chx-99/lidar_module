@@ -1,10 +1,12 @@
 #include "base/data_struct.h"
+#include "base/data_analysis.h"
 #include "concurrentqueue.h"
 #include "lidar/lidar_base.h"
 #include "lidar/lidar_scan.h"
 #include "network/port_scan.h"
-#include "process/data_analysis.h"
+#include "process/process_work.h"
 #include "queue/data_queue.h"
+
 
 #include <chrono>
 #include <iomanip>
@@ -74,16 +76,24 @@ int main(int /* argc */, char** /* argv */) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     // 连接所有雷达
-    try {
-        for (auto& lidar : lidar_devices) {
-            lidar->connect();  // 使用 -> 因为是指针
+    bool all_connected = true;
+    for (auto& lidar : lidar_devices) {
+        std::string error_msg;
+        if (!lidar->connect(&error_msg)) {
+            std::cerr << "雷达连接失败: " << error_msg << std::endl;
+            all_connected = false;
+            // 继续尝试连接其他雷达，或者选择break退出
+        } else {
             std::cout << "雷达连接成功！" << std::endl;
         }
-    } catch (const std::exception& e) {
-        std::cerr << "雷达连接失败: " << e.what() << std::endl;
-        io_context.stop();
-        for (auto& t : io_threads) { t.join(); }
-        return 1;
+    }
+    
+    if (!all_connected) {
+        std::cerr << "部分或全部雷达连接失败" << std::endl;
+        // 可以选择继续运行已连接的雷达，或者退出
+        // io_context.stop();
+        // for (auto& t : io_threads) { t.join(); }
+        // return 1;
     }
 
     // 创建线程池处理器（根据雷达数量动态计算处理线程数）
@@ -94,52 +104,14 @@ int main(int /* argc */, char** /* argv */) {
     ProcessorThreadPool processor;
 
     // 设置ACK处理回调
-    processor.setAckCallback([](const std::string &sn, const std::vector<uint8_t> &data) {
-        auto ack_tab = getAckNameCompileTime(GET_ACK_SET(data.data()), GET_ACK_ID(data.data()));
-
-        // 使用if-else替代switch，因为ack_tab是字符串
-        if (ack_tab == "HandShake ACK") {
-            HandShakeACK handshake = fromVector<HandShakeACK>(data);
-            std::cout << "[" << sn << "] 收到 HandShake ACK: " << handshake << std::endl;
-        } else if (ack_tab == "HeartBeat ACK") {
-            // HeartBeatACK heartbeat = fromVector<HeartBeatACK>(packet.data);
-            // std::cout << "[" << sn << "] 收到 HeartBeat ACK: " << heartbeat << std::endl;
-        } else if (ack_tab == "SetLaserStatus ACK") {
-            SetLaserStatusACK set_laser_status = fromVector<SetLaserStatusACK>(data);
-            std::cout << "[" << sn << "] 收到 SetLaserStatus ACK: " << set_laser_status << std::endl;
-        } else if (ack_tab == "Set IMU Frequency ACK") {
-            SetIMUFrequencyACK set_imu_frequency = fromVector<SetIMUFrequencyACK>(data);
-            std::cout << "[" << sn << "] 收到 Set IMU Frequency ACK: " << set_imu_frequency << std::endl;
-        } else {
-            std::cout << "[" << sn << "] 收到未知 ACK/MSG" << std::endl;
-        }
-    });
+    processor.setAckCallback(ack_process);
 
     // 设置点云处理回调（优化内存管理）
-    processor.setPointCloudBatchCallback([](const std::string &sn, const std::vector<std::shared_ptr<std::vector<uint8_t>>> &batch) {
-        // 使用局部变量而非thread_local，每次自动释放
-        std::vector<SingleEchoRectangularData> pointcloud_points;
-        pointcloud_points.reserve(batch.size() * 100);  // 预估容量，仅本次使用
-        
-        for (const auto& pc_ptr : batch) {
-            auto frame = fromVector<dataFrame<SingleEchoRectangularData>>( *pc_ptr );
-            pointcloud_points.insert(pointcloud_points.end(), frame.datas.begin(), frame.datas.end());
-        }
-        
-        // 在这里添加你的点云处理算法
-        // std::cout << "[" << sn << "] 处理点云: " << pointcloud_points.size() << " 点" << std::endl;
-        
-        // 函数结束时自动释放内存
-    });
+    processor.setPointCloudBatchCallback(pointcloud_process);
 
     // 设置IMU处理回调
-    processor.setIMUCallback([](const std::string &sn, const std::vector<uint8_t> &data) {
-        // 处理IMU数据（使用shared_ptr，零拷贝）
-        // std::cout << "[" << sn << "] 收到IMU数据包，大小: " << data.size() << " 字节" << std::endl;
-        // 在这里添加你的IMU处理算法
-        auto imu_frame = fromVector<dataFrame<ImuData>>(data);
-        // std::cout << "[" << sn << "] 处理完成IMU数据，时间戳: " << imu_frame.timestamp << std::endl;
-    });
+    processor.setIMUCallback(imu_process);
+
 
     // 启动线程池
     processor.start();
@@ -155,7 +127,7 @@ int main(int /* argc */, char** /* argv */) {
 
     // 断开所有雷达连接
     for (auto& lidar : lidar_devices) {
-        lidar->disconnect();  // 使用 -> 因为是指针
+        lidar->disconnect(); 
     }
 
     // 释放work_guard，允许io_context退出

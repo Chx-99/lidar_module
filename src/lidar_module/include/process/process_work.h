@@ -42,11 +42,7 @@ namespace process_worker
     class ProcessorThreadPool
     {
     public:
-        // 回调函数类型
-        using AckCallback = std::function<void(const std::string &sn, const std::vector<uint8_t> &data)>;
-        using PointCloudBatchCallback = std::function<void(const std::string &sn, const std::vector<std::shared_ptr<std::vector<uint8_t>>> &batch)>;
-        using IMUCallback = std::function<void(const std::string &sn, const std::vector<uint8_t> &data)>;
-
+        
         explicit ProcessorThreadPool()
             : running_(false) {}
 
