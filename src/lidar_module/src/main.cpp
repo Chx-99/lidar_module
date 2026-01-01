@@ -78,9 +78,8 @@ int main(int /* argc */, char** /* argv */) {
     // 连接所有雷达
     bool all_connected = true;
     for (auto& lidar : lidar_devices) {
-        std::string error_msg;
-        if (!lidar->connect(&error_msg)) {
-            std::cerr << "雷达连接失败: " << error_msg << std::endl;
+        if (!lidar->connect()) {
+            std::cerr << "雷达连接失败" << std::endl;
             all_connected = false;
             // 继续尝试连接其他雷达，或者选择break退出
         } else {
@@ -103,9 +102,6 @@ int main(int /* argc */, char** /* argv */) {
     
     ProcessorThreadPool processor;
 
-    // 设置ACK处理回调
-    processor.setAckCallback(ack_process);
-
     // 设置点云处理回调（优化内存管理）
     processor.setPointCloudBatchCallback(pointcloud_process);
 
@@ -115,6 +111,8 @@ int main(int /* argc */, char** /* argv */) {
 
     // 启动线程池
     processor.start();
+
+
 
 
 

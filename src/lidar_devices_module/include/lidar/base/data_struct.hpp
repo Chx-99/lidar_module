@@ -1,13 +1,13 @@
 /**
  * @brief 帧格式定义
  *
- * @file data_struct.h
+ * @file data_struct.hpp
  * @author cao haoxuan
  * @date 2025-12-16
  */
 
 #pragma once
-#include "crc_calculator.h"
+#include "crc_calculator.hpp"
 
 #include <bitset>
 #include <cstdint>
@@ -27,72 +27,49 @@
 */
 
 // 最小长度
-#define FRAME_SIZE 13
-#define DATA_MIN_SIZE 2
-#define FRAME_DATA_MIN_SIZE 15
+#define ACK_SIZE 13
 
 // cmd_set与cmd_id偏移量
 #define CMD_SET_INDEX 9
 #define CMD_ID_INDEX 10
-#define RET_CODE 11
+#define CMD_RET_CODE 11
 
 // 获取ack ret code字段
 #define GET_ACK_SET(data) (data)[CMD_SET_INDEX]
 #define GET_ACK_ID(data) (data)[CMD_ID_INDEX]
-#define GET_ACK_RET_CODE(data) (data)[RET_CODE]
+#define GET_ACK_RET_CODE(data) (data)[CMD_RET_CODE]
 
-// 通过cmd_set与cmd_id获取指令名称（编译期常量）
-#define GET_ACK_NAME_COMPILE_TIME(data) frame_tools::getAckNameCompileTime(GET_ACK_SET(data), GET_ACK_ID(data))
-// 拼接cmd_set与cmd_id
-#define GET_ACK_SETID_COMPILE_TIME(data) ((static_cast<uint16_t>(GET_ACK_SET(data)) << 8) | GET_ACK_ID(data))
+// ack data字段起始位置
+#define ACK_DATA_INDEX 9
+// 点云数据和imu的data字段起始位置
+#define DATA_INDEX 18
 
-// 将帧对象转化为std::span<const uint8_t>
-#define FRAME_TO_SPAN(data) frame_tools::frameToSpan(reinterpret_cast<const uint8_t *>(&data), data.length)
-// 从std::span<const uint8_t>获取帧对象
-#define SPAN_TO_FRAME(span, T) frame_tools::fromSpan<T>(span)
-// 从std::vector<uint8_t>获取帧对象
-#define VECTOR_TO_FRAME(vec, T) frame_tools::fromVector<T>(vec)
-// 获取span中data字段
-#define DATA_FIELD_SPAN(data) frame_tools::getDataFieldSpan(reinterpret_cast<const uint8_t *>(&data), data.length)
-// 获取vector中data字段
-#define DATA_FIELD_VECTOR(data) frame_tools::getDataFieldVector(reinterpret_cast<const uint8_t *>(&data), data.length)
+// 通过cmd_set与cmd_id获取指令名称
+#define GET_ACK_NAME(data) frame_tools::getAckNameCompileTime(GET_ACK_SET(data), GET_ACK_ID(data))
+// 获取拼接的cmd_set与cmd_id
+#define GET_ACK_SETID(data) ((static_cast<uint16_t>(GET_ACK_SET(data)) << 8) | GET_ACK_ID(data))
+
 
 namespace frame_tools
 {
-    // 获取ack中data字段
-    inline std::span<const uint8_t> getDataFieldSpan(const uint8_t *data, size_t size)
-    {
-        if (size < FRAME_DATA_MIN_SIZE)
-            throw std::invalid_argument("帧协议长度最小长度是15字节");
-        return std::span<const uint8_t>(data + 9, size - FRAME_SIZE);
-    }
 
-    inline std::vector<uint8_t> getDataFieldVector(const uint8_t *data, size_t size)
-    {
-        if (size < FRAME_DATA_MIN_SIZE)
-            throw std::invalid_argument("帧协议长度最小长度是15字节");
-        return std::vector<uint8_t>(data + 9, data + size - 4);
-    }
-
-    // 从std::span<const uint8_t>获取帧对象
+    // 将消息帧转化为span<const uint8_t>
     template <typename T>
-    inline T fromSpan(const std::span<const uint8_t> &span)
+    inline std::span<const uint8_t> frameToSpan(T &data)
     {
-        if (span.size() < FRAME_SIZE)
-            throw std::invalid_argument("Span size is smaller than frame size");
-        T frame;
-        std::memcpy(&frame, span.data(), std::min(span.size(), sizeof(T)));
-        return frame;
+        return std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(&data), sizeof(T));
     }
 
     // 从std::vector<uint8_t>获取帧对象
     template <typename T>
-    inline T fromVector(const std::vector<uint8_t> &vec)
+    inline T vectorToObject(const std::vector<uint8_t> &vec)
     {
-        if (vec.size() < FRAME_SIZE)
-            throw std::invalid_argument("Vector size is smaller than frame size");
+        if (vec.size() != sizeof(T))
+        {
+            throw std::invalid_argument("vector大小与目标类型大小不匹配");
+        }
         T frame;
-        std::memcpy(&frame, vec.data(), std::min(vec.size(), sizeof(T)));
+        std::memcpy(&frame, vec.data(), sizeof(T));
         return frame;
     }
 
@@ -117,12 +94,6 @@ namespace frame_tools
         default:
             return "UnKnown ACK/MSG";
         }
-    }
-
-    // 将消息帧转化为span<const uint8_t>
-    inline std::span<const uint8_t> frameToSpan(const uint8_t *data, size_t size)
-    {
-        return std::span<const uint8_t>(data, size);
     }
 
 }; // namespace frame_tools
@@ -657,7 +628,7 @@ namespace base_frame
         传感器数据基础帧协议
     */
     template <typename dataType, std::size_t N = 96>
-    struct dataFrame
+    struct DataFrame
     {
         uint8_t version;               // 版本号
         uint8_t slot_id;               // 端口号
@@ -669,7 +640,7 @@ namespace base_frame
         uint64_t timestamp;            // 时间戳
         std::array<dataType, N> datas; // 数据
 
-        inline friend std::ostream &operator<<(std::ostream &os, const dataFrame &frame)
+        inline friend std::ostream &operator<<(std::ostream &os, const DataFrame &frame)
         {
             std::ostringstream oss;
             oss << "version: " << static_cast<int>(frame.version) << "\n";

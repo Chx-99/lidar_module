@@ -21,7 +21,7 @@ public:
 
     // 池大小配置
     static constexpr size_t POOL_SIZE = PoolSize;
-    static constexpr size_t DEFAULT_BUFFER_CAPACITY = 2048;  // 默认预分配容量
+    static constexpr size_t DEFAULT_BUFFER_CAPACITY = 512;  // 默认预分配容量
 
     /**
      * @brief 构造函数，预分配池中所有缓冲区

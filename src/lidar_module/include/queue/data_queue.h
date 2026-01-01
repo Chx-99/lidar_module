@@ -15,21 +15,16 @@ namespace free_queue
     struct LidarQueues
     {
         // 队列配置（降低容量，避免ConcurrentQueue内部分配过多内存块）
-        static constexpr size_t ack_queue_max_size_ = 16;          // 每个雷达的ACK队列容量
-        static constexpr size_t pointcloud_queue_max_size_ = 512;  // 降低到512，快速消费避免积压
-        static constexpr size_t imu_queue_max_size_ = 128;         // 降低到128
+        static constexpr size_t pointcloud_queue_max_size_ = 512; // 降低到512，快速消费避免积压
+        static constexpr size_t imu_queue_max_size_ = 128;        // 降低到128
 
         // 阻塞队列：wait_dequeue 会自动阻塞等待数据，无需轮询
-        moodycamel::ConcurrentQueue<std::shared_ptr<std::vector<uint8_t>>> ack_queue;
         moodycamel::ConcurrentQueue<std::shared_ptr<std::vector<uint8_t>>> pointcloud_queue;
         moodycamel::ConcurrentQueue<std::shared_ptr<std::vector<uint8_t>>> imu_queue;
 
-        LidarQueues()
-            : ack_queue(ack_queue_max_size_), 
-            pointcloud_queue(pointcloud_queue_max_size_), imu_queue(imu_queue_max_size_) {}
+        LidarQueues() : pointcloud_queue(pointcloud_queue_max_size_), imu_queue(imu_queue_max_size_) {}
 
         // 获取队列大小
-        size_t ackQueueSize() const { return ack_queue.size_approx(); }
         size_t pointCloudQueueSize() const { return pointcloud_queue.size_approx(); }
         size_t imuQueueSize() const { return imu_queue.size_approx(); }
     };
@@ -38,7 +33,6 @@ namespace free_queue
     class QueueManager
     {
     public:
-
         static QueueManager &instance()
         {
             static QueueManager instance;
