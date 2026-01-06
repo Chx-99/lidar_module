@@ -1,13 +1,19 @@
 /**
  * @brief 帧格式定义
  *
- * @file data_struct.h
+ * @file data_struct.hpp
  * @author cao haoxuan
  * @date 2025-12-16
  */
 
 #pragma once
-#include "crc_calculator.h"
+#include "sensor/lidar/base/crc_calculator.hpp"
+
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/imu.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/msg/point_field.hpp>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
 
 #include <bitset>
 #include <cstdint>
@@ -27,105 +33,27 @@
 */
 
 // 最小长度
-#define FRAME_SIZE 13
-#define DATA_MIN_SIZE 2
-#define FRAME_DATA_MIN_SIZE 15
+#define ACK_SIZE 13
 
 // cmd_set与cmd_id偏移量
 #define CMD_SET_INDEX 9
 #define CMD_ID_INDEX 10
-#define RET_CODE 11
+#define CMD_RET_CODE 11
 
 // 获取ack ret code字段
 #define GET_ACK_SET(data) (data)[CMD_SET_INDEX]
 #define GET_ACK_ID(data) (data)[CMD_ID_INDEX]
-#define GET_ACK_RET_CODE(data) (data)[RET_CODE]
+#define GET_ACK_RET_CODE(data) (data)[CMD_RET_CODE]
 
-// 通过cmd_set与cmd_id获取指令名称（编译期常量）
-#define GET_ACK_NAME_COMPILE_TIME(data) frame_tools::getAckNameCompileTime(GET_ACK_SET(data), GET_ACK_ID(data))
-// 拼接cmd_set与cmd_id
-#define GET_ACK_SETID_COMPILE_TIME(data) ((static_cast<uint16_t>(GET_ACK_SET(data)) << 8) | GET_ACK_ID(data))
+// ack data字段起始位置
+#define ACK_DATA_INDEX 9
+// 点云数据和imu的data字段起始位置
+#define DATA_INDEX 18
 
-// 将帧对象转化为std::span<const uint8_t>
-#define FRAME_TO_SPAN(data) frame_tools::frameToSpan(reinterpret_cast<const uint8_t *>(&data), data.length)
-// 从std::span<const uint8_t>获取帧对象
-#define SPAN_TO_FRAME(span, T) frame_tools::fromSpan<T>(span)
-// 从std::vector<uint8_t>获取帧对象
-#define VECTOR_TO_FRAME(vec, T) frame_tools::fromVector<T>(vec)
-// 获取span中data字段
-#define DATA_FIELD_SPAN(data) frame_tools::getDataFieldSpan(reinterpret_cast<const uint8_t *>(&data), data.length)
-// 获取vector中data字段
-#define DATA_FIELD_VECTOR(data) frame_tools::getDataFieldVector(reinterpret_cast<const uint8_t *>(&data), data.length)
-
-namespace frame_tools
-{
-    // 获取ack中data字段
-    inline std::span<const uint8_t> getDataFieldSpan(const uint8_t *data, size_t size)
-    {
-        if (size < FRAME_DATA_MIN_SIZE)
-            throw std::invalid_argument("帧协议长度最小长度是15字节");
-        return std::span<const uint8_t>(data + 9, size - FRAME_SIZE);
-    }
-
-    inline std::vector<uint8_t> getDataFieldVector(const uint8_t *data, size_t size)
-    {
-        if (size < FRAME_DATA_MIN_SIZE)
-            throw std::invalid_argument("帧协议长度最小长度是15字节");
-        return std::vector<uint8_t>(data + 9, data + size - 4);
-    }
-
-    // 从std::span<const uint8_t>获取帧对象
-    template <typename T>
-    inline T fromSpan(const std::span<const uint8_t> &span)
-    {
-        if (span.size() < FRAME_SIZE)
-            throw std::invalid_argument("Span size is smaller than frame size");
-        T frame;
-        std::memcpy(&frame, span.data(), std::min(span.size(), sizeof(T)));
-        return frame;
-    }
-
-    // 从std::vector<uint8_t>获取帧对象
-    template <typename T>
-    inline T fromVector(const std::vector<uint8_t> &vec)
-    {
-        if (vec.size() < FRAME_SIZE)
-            throw std::invalid_argument("Vector size is smaller than frame size");
-        T frame;
-        std::memcpy(&frame, vec.data(), std::min(vec.size(), sizeof(T)));
-        return frame;
-    }
-
-    // 通过set与id解析对应指令类型
-    constexpr std::string_view getAckNameCompileTime(uint8_t cmd_set, uint8_t cmd_id)
-    {
-        const uint16_t key = (static_cast<uint16_t>(cmd_set) << 8) | cmd_id;
-        switch (key)
-        {
-        case 0x0000:
-            return "Broadcast MSG";
-        case 0x0001:
-            return "HandShake ACK";
-        case 0x0003:
-            return "HeartBeat ACK";
-        case 0x0004:
-            return "SetLaserStatus ACK";
-        case 0x0007:
-            return "ErrorMessage";
-        case 0x0108:
-            return "Set IMU Frequency ACK";
-        default:
-            return "UnKnown ACK/MSG";
-        }
-    }
-
-    // 将消息帧转化为span<const uint8_t>
-    inline std::span<const uint8_t> frameToSpan(const uint8_t *data, size_t size)
-    {
-        return std::span<const uint8_t>(data, size);
-    }
-
-}; // namespace frame_tools
+// 通过cmd_set与cmd_id获取指令名称
+#define GET_ACK_NAME(data) frame_tools::getAckNameCompileTime(GET_ACK_SET(data), GET_ACK_ID(data))
+// 获取拼接的cmd_set与cmd_id
+#define GET_ACK_SETID(data) ((static_cast<uint16_t>(GET_ACK_SET(data)) << 8) | GET_ACK_ID(data))
 
 namespace base_frame
 {
@@ -160,7 +88,7 @@ namespace base_frame
 
         void update()
         {
-            length = static_cast<uint16_t>(sizeof(data) + FRAME_SIZE);
+            length = static_cast<uint16_t>(sizeof(data) + ACK_SIZE);
             crc_16 = crc16(reinterpret_cast<const uint8_t *>(this), 7);
             crc_32 = crc32(reinterpret_cast<const uint8_t *>(this), length - 4);
         }
@@ -653,11 +581,53 @@ namespace base_frame
         }
     };
 
+    /**
+     *断开链接指令
+     */
+    struct Disconnect
+    {
+        uint8_t cmd_set = 0x00;
+        uint8_t cmd_id = 0x06;
+
+        Disconnect() = default;
+
+        inline friend std::ostream &operator<<(std::ostream &os, const Disconnect &ack)
+        {
+            std::ostringstream oss;
+            oss << std::hex << std::uppercase << std::setfill('0');
+            oss << "cmd_set: 0x" << static_cast<int>(ack.cmd_set) << "\n";
+            oss << "cmd_id: 0x" << static_cast<int>(ack.cmd_id) << "\n";
+            os << oss.str();
+            return os;
+        }
+    };
+
+    /**
+     * 断开链接应答
+     */
+    struct DisconnectACK
+    {
+        uint8_t cmd_set = 0x00;
+        uint8_t cmd_id = 0x06;
+        uint8_t ret_code;
+
+        inline friend std::ostream &operator<<(std::ostream &os, const DisconnectACK &msg)
+        {
+            std::ostringstream oss;
+            oss << std::hex << std::uppercase << std::setfill('0');
+            oss << "cmd_set: 0x" << static_cast<int>(msg.cmd_set) << "\n";
+            oss << "cmd_id: 0x" << static_cast<int>(msg.cmd_id) << "\n";
+            oss << "ret_code: 0x" << static_cast<int>(msg.ret_code) << "\n";
+            os << oss.str();
+            return os;
+        }
+    };
+
     /*
         传感器数据基础帧协议
     */
     template <typename dataType, std::size_t N = 96>
-    struct dataFrame
+    struct DataFrame
     {
         uint8_t version;               // 版本号
         uint8_t slot_id;               // 端口号
@@ -669,7 +639,7 @@ namespace base_frame
         uint64_t timestamp;            // 时间戳
         std::array<dataType, N> datas; // 数据
 
-        inline friend std::ostream &operator<<(std::ostream &os, const dataFrame &frame)
+        inline friend std::ostream &operator<<(std::ostream &os, const DataFrame &frame)
         {
             std::ostringstream oss;
             oss << "version: " << static_cast<int>(frame.version) << "\n";
@@ -734,3 +704,163 @@ namespace base_frame
 
 #pragma pack(pop)
 }; // namespace base_frame
+
+namespace frame_tools
+{
+
+    // 将消息帧转化为span<const uint8_t>
+    template <typename DataType>
+    inline std::span<const uint8_t> frameToSpan(const base_frame::Frame<DataType> &frame)
+    {
+        return std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(&frame), sizeof(frame));
+    }
+
+    // 从std::vector<uint8_t>获取帧对象
+    template <typename T>
+    inline T vectorToObject(const std::vector<uint8_t> &vec)
+    {
+        if (vec.size() != sizeof(T))
+        {
+            throw std::invalid_argument("vector大小与目标类型大小不匹配");
+        }
+        T frame;
+        std::memcpy(&frame, vec.data(), sizeof(T));
+        return frame;
+    }
+
+    // 通过set与id解析对应指令类型
+    constexpr std::string_view getAckNameCompileTime(uint8_t cmd_set, uint8_t cmd_id)
+    {
+        const uint16_t key = (static_cast<uint16_t>(cmd_set) << 8) | cmd_id;
+        switch (key)
+        {
+        case 0x0000:
+            return "Broadcast MSG";
+        case 0x0001:
+            return "HandShake ACK";
+        case 0x0003:
+            return "HeartBeat ACK";
+        case 0x0004:
+            return "SetLaserStatus ACK";
+        case 0x0007:
+            return "ErrorMessage";
+        case 0x0006:
+            return "Disconnect ACK";
+        case 0x0108:
+            return "Set IMU Frequency ACK";
+        default:
+            return "UnKnown ACK/MSG";
+        }
+    }
+
+    sensor_msgs::msg::PointCloud2::SharedPtr convertToPointCloud2(const std::vector<std::pair<double, base_frame::DataFrame<base_frame::SingleEchoRectangularData, 96>>> &batch, std::string &sn)
+    {
+        auto cloud_msg = std::make_shared<sensor_msgs::msg::PointCloud2>();
+
+        // 使用第一帧的时间戳
+        cloud_msg->header.stamp = rclcpp::Time(static_cast<int64_t>(batch.front().first * 1e9));
+        cloud_msg->header.frame_id = "lidar_" + sn;
+
+        // 定义字段
+        cloud_msg->fields.resize(7);
+        cloud_msg->fields[0].name = "x";
+        cloud_msg->fields[0].offset = 0;
+        cloud_msg->fields[0].datatype = sensor_msgs::msg::PointField::FLOAT32;
+        cloud_msg->fields[0].count = 1;
+
+        cloud_msg->fields[1].name = "y";
+        cloud_msg->fields[1].offset = 4;
+        cloud_msg->fields[1].datatype = sensor_msgs::msg::PointField::FLOAT32;
+        cloud_msg->fields[1].count = 1;
+
+        cloud_msg->fields[2].name = "z";
+        cloud_msg->fields[2].offset = 8;
+        cloud_msg->fields[2].datatype = sensor_msgs::msg::PointField::FLOAT32;
+        cloud_msg->fields[2].count = 1;
+
+        cloud_msg->fields[3].name = "intensity";
+        cloud_msg->fields[3].offset = 12;
+        cloud_msg->fields[3].datatype = sensor_msgs::msg::PointField::FLOAT32;
+        cloud_msg->fields[3].count = 1;
+
+        cloud_msg->fields[4].name = "timestamp";
+        cloud_msg->fields[4].offset = 16;
+        cloud_msg->fields[4].datatype = sensor_msgs::msg::PointField::FLOAT32;
+        cloud_msg->fields[4].count = 1;
+
+        cloud_msg->fields[5].name = "tag";
+        cloud_msg->fields[5].offset = 20;
+        cloud_msg->fields[5].datatype = sensor_msgs::msg::PointField::UINT8;
+        cloud_msg->fields[5].count = 1;
+
+        cloud_msg->fields[6].name = "line";
+        cloud_msg->fields[6].offset = 21;
+        cloud_msg->fields[6].datatype = sensor_msgs::msg::PointField::UINT8;
+        cloud_msg->fields[6].count = 1;
+
+        // 预分配内存
+        size_t max_points = batch.size() * 96;
+        cloud_msg->height = 1;
+        cloud_msg->width = max_points;
+        cloud_msg->is_dense = true;
+        cloud_msg->point_step = 22;
+        cloud_msg->row_step = cloud_msg->point_step * cloud_msg->width;
+        cloud_msg->data.resize(cloud_msg->width * cloud_msg->point_step);
+
+        // 创建迭代器
+        sensor_msgs::PointCloud2Iterator<float> iter_x(*cloud_msg, "x");
+        sensor_msgs::PointCloud2Iterator<float> iter_y(*cloud_msg, "y");
+        sensor_msgs::PointCloud2Iterator<float> iter_z(*cloud_msg, "z");
+        sensor_msgs::PointCloud2Iterator<float> iter_intensity(*cloud_msg, "intensity");
+        sensor_msgs::PointCloud2Iterator<float> iter_timestamp(*cloud_msg, "timestamp");
+        sensor_msgs::PointCloud2Iterator<uint8_t> iter_tag(*cloud_msg, "tag");
+        sensor_msgs::PointCloud2Iterator<uint8_t> iter_line(*cloud_msg, "line");
+
+        float point_timestamp_s = 0.0f;
+
+        // 写入点云数据
+        for (const auto &tf : batch)
+        {
+            for (const auto &point : tf.second.datas)
+            {
+                *iter_x = point.x / 1000.0f;
+                *iter_y = point.y / 1000.0f;
+                *iter_z = point.z / 1000.0f;
+                *iter_intensity = static_cast<float>(point.intensity);
+                *iter_timestamp = point_timestamp_s;
+                *iter_tag = point.lable & 0x0F;
+                *iter_line = (point.lable >> 4) & 0x0F;
+
+                ++iter_x;
+                ++iter_y;
+                ++iter_z;
+                ++iter_intensity;
+                ++iter_timestamp;
+                ++iter_tag;
+                ++iter_line;
+
+                point_timestamp_s += 10 * 1e-6f; // 10微秒
+            }
+        }
+
+        return cloud_msg;
+    }
+
+    sensor_msgs::msg::Imu::SharedPtr convertToImu(std::pair<double, base_frame::DataFrame<base_frame::ImuData, 1>> &frame, std::string &sn)
+    {
+        auto imu_msg = std::make_shared<sensor_msgs::msg::Imu>();
+        imu_msg->header.stamp = rclcpp::Time(static_cast<int64_t>(frame.first * 1e9));
+        imu_msg->header.frame_id = "imu_" + sn;
+
+        const auto &data = frame.second.datas[0];
+        imu_msg->linear_acceleration.x = data.acc_x;
+        imu_msg->linear_acceleration.y = data.acc_y;
+        imu_msg->linear_acceleration.z = data.acc_z;
+        imu_msg->angular_velocity.x = data.gyro_x;
+        imu_msg->angular_velocity.y = data.gyro_y;
+        imu_msg->angular_velocity.z = data.gyro_z;
+
+        return imu_msg;
+    }
+
+}; // namespace frame_tools

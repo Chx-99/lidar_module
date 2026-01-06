@@ -24,6 +24,7 @@ FetchContent_MakeAvailable(concurrentqueue)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(tf2 REQUIRED)
@@ -44,7 +45,9 @@ add_definitions(${PCL_DEFINITIONS})
 
 # 主可执行文件
 set(executable_name lidar_node)
-add_executable(${executable_name} src/main.cpp)
+add_executable(${executable_name} 
+  src/main.cpp
+)
 
 # 目标包含目录和链接
 target_include_directories(${executable_name} PUBLIC
@@ -67,6 +70,7 @@ target_compile_options(${executable_name} PRIVATE -O3 -march=native)
 set(dependencies
   rclcpp
   sensor_msgs
+  std_srvs
   geometry_msgs
   std_msgs
   tf2

@@ -1,8 +1,8 @@
 // 雷达扫描器 - header-only 实现，支持多网卡扫描，简洁高效版本
 #pragma once
 
-#include "base/data_struct.h"
-#include "network/port_scan.h"
+#include "sensor/lidar/base/data_struct.hpp"
+#include "sensor/lidar/base/port_scan.hpp"
 
 #include <boost/asio.hpp>
 #include <boost/asio/ip/address.hpp>
