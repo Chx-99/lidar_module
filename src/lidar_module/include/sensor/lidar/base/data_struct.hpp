@@ -51,11 +51,11 @@
 #define DATA_INDEX 18
 
 // 通过cmd_set与cmd_id获取指令名称
-#define GET_ACK_NAME(data) frame_tools::getAckNameCompileTime(GET_ACK_SET(data), GET_ACK_ID(data))
+#define GET_ACK_NAME(data) lidar_frame_tools::getAckNameCompileTime(GET_ACK_SET(data), GET_ACK_ID(data))
 // 获取拼接的cmd_set与cmd_id
 #define GET_ACK_SETID(data) ((static_cast<uint16_t>(GET_ACK_SET(data)) << 8) | GET_ACK_ID(data))
 
-namespace base_frame
+namespace lidar_base_frame
 {
 #pragma pack(push, 1) // 确保结构体的字节对齐为1字节
 
@@ -703,14 +703,14 @@ namespace base_frame
     };
 
 #pragma pack(pop)
-}; // namespace base_frame
+}; // namespace lidar_base_frame
 
-namespace frame_tools
+namespace lidar_frame_tools
 {
 
     // 将消息帧转化为span<const uint8_t>
     template <typename DataType>
-    inline std::span<const uint8_t> frameToSpan(const base_frame::Frame<DataType> &frame)
+    inline std::span<const uint8_t> frameToSpan(const lidar_base_frame::Frame<DataType> &frame)
     {
         return std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(&frame), sizeof(frame));
     }
@@ -753,7 +753,7 @@ namespace frame_tools
         }
     }
 
-    sensor_msgs::msg::PointCloud2::SharedPtr convertToPointCloud2(const std::vector<std::pair<double, base_frame::DataFrame<base_frame::SingleEchoRectangularData, 96>>> &batch, std::string &sn)
+    sensor_msgs::msg::PointCloud2::SharedPtr convertToPointCloud2(const std::vector<std::pair<double, lidar_base_frame::DataFrame<lidar_base_frame::SingleEchoRectangularData, 96>>> &batch, std::string &sn)
     {
         auto cloud_msg = std::make_shared<sensor_msgs::msg::PointCloud2>();
 
@@ -846,7 +846,7 @@ namespace frame_tools
         return cloud_msg;
     }
 
-    sensor_msgs::msg::Imu::SharedPtr convertToImu(std::pair<double, base_frame::DataFrame<base_frame::ImuData, 1>> &frame, std::string &sn)
+    sensor_msgs::msg::Imu::SharedPtr convertToImu(std::pair<double, lidar_base_frame::DataFrame<lidar_base_frame::ImuData, 1>> &frame, std::string &sn)
     {
         auto imu_msg = std::make_shared<sensor_msgs::msg::Imu>();
         imu_msg->header.stamp = rclcpp::Time(static_cast<int64_t>(frame.first * 1e9));
@@ -863,4 +863,4 @@ namespace frame_tools
         return imu_msg;
     }
 
-}; // namespace frame_tools
+}; // namespace lidar_frame_tools

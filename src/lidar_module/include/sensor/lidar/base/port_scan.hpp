@@ -28,8 +28,7 @@ inline std::vector<std::tuple<std::string, std::vector<std::string>>> getAllLoca
 
     struct ifaddrs* ifaddr;
     if (getifaddrs(&ifaddr) == -1) {
-        std::cerr << "获取网络接口失败" << std::endl;
-        return {};
+        throw std::runtime_error("获取网络接口失败");
     }
 
     for (auto* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {

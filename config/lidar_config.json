@@ -1,0 +1,64 @@
+{
+    "lidar180":[
+        {
+            "sn": "BAD8I539",
+            "is_save_pcd": true,
+            "save_path": "./pcds/lidar180",
+            "motor": {
+                "comm_type": "rtu",
+                "byte_order": "big_endian",
+                "slave_id": 1,
+                "serial_port": "/dev/ttyUSB0"
+            },
+            "lidar":{
+                "accumulated_frames": 12500,
+                "angle_segments": 6,
+                "angle_y_deg": 37.25,
+                "voxel_size": 0.05
+            }
+        },
+        {
+            "sn": "BXXXXX19",
+            "motor": {
+                "comm_type": "tcp",
+                "byte_order": "big_endian",
+                "slave_id": 1,
+                "motor_ip": "192.168.1.140",
+                "network_port": 8080
+            },
+            "lidar":{
+                "angle_segments": 6,
+                "angle_y_deg": 37.5,
+                "voxel_size": 0.05  
+            }
+        },
+        {
+            "sn": "BXXXXX29",
+            "motor": {
+                "comm_type": "ttw",
+                "byte_order": "big_endian",
+                "slave_id": 1,
+                "motor_ip": "192.168.1.141",
+                "network_port": 8080
+            },
+            "lidar":{
+                "angle_segments": 6,
+                "angle_y_deg": 37.5,
+                "voxel_size": 0.05  
+            }
+        }
+    ] ,
+    "lidar80": [
+        {
+            "sn": "BXXXXX39",
+            "is_save_pcd": true,
+            "save_path": "./pcds/lidar80",
+            "lidar": {
+                "accumulated_frames": 5000
+            }
+        },
+        {
+            "sn": "BXXXXX49"
+        }
+    ]
+}

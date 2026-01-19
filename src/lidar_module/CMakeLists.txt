@@ -29,14 +29,23 @@ find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
-find_package(PCL REQUIRED COMPONENTS common io)
+find_package(PCL REQUIRED COMPONENTS common io filters)
 find_package(pcl_conversions REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system thread)
+find_package(nlohmann_json REQUIRED)
+
+# 使用 pkg-config 查找 libmodbus
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBMODBUS REQUIRED libmodbus)
+
+# PCL相关的编译选项（必须与PCL库编译选项保持一致）
+# 不要添加任何可能改变ABI的Eigen宏定义
 
 # 包含目录
 include_directories(
   include
   ${PCL_INCLUDE_DIRS}
+  ${LIBMODBUS_INCLUDE_DIRS}
 )
 
 # 链接目录
@@ -60,11 +69,12 @@ target_include_directories(${executable_name} PUBLIC
 target_link_libraries(${executable_name}
   ${PCL_LIBRARIES}
   ${Boost_LIBRARIES}
+  ${LIBMODBUS_LIBRARIES}
   atomic  # C++20 atomic shared_ptr support
 )
 
-# 设置编译选项
-target_compile_options(${executable_name} PRIVATE -O3 -march=native)
+# 设置编译选项（调试模式保持简单，避免与PCL库不兼容）
+target_compile_options(${executable_name} PRIVATE -g -O0 -fno-omit-frame-pointer)
 
 # 声明依赖项
 set(dependencies

@@ -8,6 +8,8 @@
 #include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/udp.hpp>
 
+#include <rclcpp/rclcpp.hpp>
+
 #include <cstring>
 #include <iostream>
 #include <memory>
@@ -55,15 +57,14 @@ namespace lidar_scanner
                 throw std::runtime_error("未找到可用的网络接口");
             }
 
-            std::cout << "找到 " << interfaces.size() << " 个网络接口:" << std::endl;
+            RCLCPP_INFO(rclcpp::get_logger("LidarScanner"), "找到 %zu 个网络接口:", interfaces.size());
             for (const auto &[iface, ip_list] : interfaces)
             {
-                std::cout << "  - " << iface << ":";
+                RCLCPP_INFO(rclcpp::get_logger("LidarScanner"), "  - %s:", iface.c_str());
                 for (const auto &ip : ip_list)
                 {
-                    std::cout << " " << ip;
+                    RCLCPP_INFO(rclcpp::get_logger("LidarScanner"), "    - %s", ip.c_str());
                 }
-                std::cout << std::endl;
             }
 
             // 创建独立的 io_context
@@ -95,10 +96,10 @@ namespace lidar_scanner
                     if (setsockopt(sock->native_handle(), SOL_SOCKET, SO_BINDTODEVICE, iface_name.c_str(),
                                    iface_name.size()) != 0)
                     {
-                        std::cerr << "警告: 无法绑定到网卡 " << iface_name << ": " << strerror(errno) << std::endl;
+                        RCLCPP_WARN(rclcpp::get_logger("LidarScanner"), "警告: 无法绑定到网卡 %s: %s", iface_name.c_str(), strerror(errno));
                     }
 
-                    std::cout << "成功在 " << iface_name << " 上监听端口 " << port_ << std::endl;
+                    RCLCPP_INFO(rclcpp::get_logger("LidarScanner"), "成功在 %s 上监听端口 %u", iface_name.c_str(), port_);
 
                     // 启动异步接收（使用第一个IP作为local_ip标识）
                     startReceiveOnSocket(sock, ip_list, lidars, lidars_mutex);
@@ -106,7 +107,7 @@ namespace lidar_scanner
                 }
                 catch (const std::exception &e)
                 {
-                    std::cerr << "无法在 " << iface_name << " 上创建监听: " << e.what() << std::endl;
+                    RCLCPP_ERROR(rclcpp::get_logger("LidarScanner"), "无法在 %s 上创建监听: %s", iface_name.c_str(), e.what());
                 }
             }
 
@@ -130,9 +131,9 @@ namespace lidar_scanner
             } });
 
             // 直接运行 io_context（阻塞直到完成）
-            std::cout << "开始扫描雷达..." << std::endl;
+            RCLCPP_INFO(rclcpp::get_logger("LidarScanner"), "开始扫描雷达...");
             io_context.run();
-            std::cout << "扫描" << seconds_ << "s完成，找到 " << lidars.size() << " 个雷达" << std::endl;
+            RCLCPP_INFO(rclcpp::get_logger("LidarScanner"), "扫描 %d s 完成，找到 %zu 个雷达", seconds_, lidars.size());
 
             return lidars;
         }
@@ -185,7 +186,7 @@ namespace lidar_scanner
                             // 正常关闭
                             return;
                         }
-                        std::cerr << "接收错误: " << error.message() << std::endl;
+                        RCLCPP_ERROR(rclcpp::get_logger("LidarScanner"), "接收错误: %s", error.message().c_str());
                         return;
                     }
 
@@ -193,10 +194,10 @@ namespace lidar_scanner
                     {
                         try
                         {
-                            if (bytes_transferred >= sizeof(base_frame::Frame<base_frame::BoardCastMSG>))
+                            if (bytes_transferred >= sizeof(lidar_base_frame::Frame<lidar_base_frame::BoardCastMSG>))
                             {
                                 auto frame =
-                                    reinterpret_cast<const base_frame::Frame<base_frame::BoardCastMSG> *>(buffer->data());
+                                    reinterpret_cast<const lidar_base_frame::Frame<lidar_base_frame::BoardCastMSG> *>(buffer->data());
 
                                 // 验证帧格式
                                 if (frame->sof == 0xAA && frame->data.cmd_set == 0x00 && frame->data.cmd_id == 0x00)
@@ -215,11 +216,10 @@ namespace lidar_scanner
                                         if (lidars.find(zwkj_sn) == lidars.end())
                                         {
                                             // 首次见到这个雷达
-                                            std::cout << "收到雷达广播:" << std::endl;
-                                            std::cout << "  SN码: " << zwkj_sn << std::endl;
-                                            std::cout << "  雷达IP: " << lidar_ip << std::endl;
-                                            std::cout << "  本地IP: " << matched_local_ip << std::endl;
-
+                                            RCLCPP_INFO(rclcpp::get_logger("LidarScanner"), "收到雷达广播:");
+                                            RCLCPP_INFO(rclcpp::get_logger("LidarScanner"), "  SN码: %s", zwkj_sn.c_str());
+                                            RCLCPP_INFO(rclcpp::get_logger("LidarScanner"), "  雷达IP: %s", lidar_ip.c_str());
+                                            RCLCPP_INFO(rclcpp::get_logger("LidarScanner"), "  本地IP: %s", matched_local_ip.c_str());
                                             lidars.emplace(zwkj_sn, LidarInfo(lidar_ip, matched_local_ip));
                                         }
                                     }
@@ -228,7 +228,7 @@ namespace lidar_scanner
                         }
                         catch (const std::exception &e)
                         {
-                            std::cerr << "解析广播消息失败: " << e.what() << std::endl;
+                            RCLCPP_ERROR(rclcpp::get_logger("LidarScanner"), "解析广播消息失败: %s", e.what());
                         }
                     }
 
