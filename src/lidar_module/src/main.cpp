@@ -10,7 +10,7 @@ int main(int argc, char **argv)
 {
     // 初始化 ROS2
     rclcpp::init(argc, argv);
-    auto lidar_creator = lidar_creator::LidarCreator(3, 55000, "./config/lidar_config.json");
+    auto lidar_creator = lidar_creator::LidarCreator("/opt/zwkj/configs/lidar_config.json", 3, 55000);
     auto lidar_nodes = lidar_creator.scanAndCreateAll();
     if (lidar_nodes.empty())
     {
@@ -33,6 +33,7 @@ int main(int argc, char **argv)
 
     // 运行执行器（阻塞）
     executor.spin();
+    rclcpp::shutdown();
 
     return 0;
 }

@@ -762,7 +762,7 @@ namespace lidar_frame_tools
         cloud_msg->header.frame_id = "lidar_" + sn;
 
         // 定义字段
-        cloud_msg->fields.resize(7);
+        cloud_msg->fields.resize(8);
         cloud_msg->fields[0].name = "x";
         cloud_msg->fields[0].offset = 0;
         cloud_msg->fields[0].datatype = sensor_msgs::msg::PointField::FLOAT32;
@@ -788,22 +788,27 @@ namespace lidar_frame_tools
         cloud_msg->fields[4].datatype = sensor_msgs::msg::PointField::FLOAT32;
         cloud_msg->fields[4].count = 1;
 
-        cloud_msg->fields[5].name = "tag";
+        cloud_msg->fields[5].name = "echo";
         cloud_msg->fields[5].offset = 20;
         cloud_msg->fields[5].datatype = sensor_msgs::msg::PointField::UINT8;
         cloud_msg->fields[5].count = 1;
 
-        cloud_msg->fields[6].name = "line";
+        cloud_msg->fields[6].name = "intensity_tag";
         cloud_msg->fields[6].offset = 21;
         cloud_msg->fields[6].datatype = sensor_msgs::msg::PointField::UINT8;
         cloud_msg->fields[6].count = 1;
+
+        cloud_msg->fields[7].name = "space_tag";
+        cloud_msg->fields[7].offset = 22;
+        cloud_msg->fields[7].datatype = sensor_msgs::msg::PointField::UINT8;
+        cloud_msg->fields[7].count = 1;
 
         // 预分配内存
         size_t max_points = batch.size() * 96;
         cloud_msg->height = 1;
         cloud_msg->width = max_points;
         cloud_msg->is_dense = true;
-        cloud_msg->point_step = 22;
+        cloud_msg->point_step = 23; // 每个点的字节数 (4+4+4+4+4+1+1+1=23)
         cloud_msg->row_step = cloud_msg->point_step * cloud_msg->width;
         cloud_msg->data.resize(cloud_msg->width * cloud_msg->point_step);
 
@@ -813,8 +818,9 @@ namespace lidar_frame_tools
         sensor_msgs::PointCloud2Iterator<float> iter_z(*cloud_msg, "z");
         sensor_msgs::PointCloud2Iterator<float> iter_intensity(*cloud_msg, "intensity");
         sensor_msgs::PointCloud2Iterator<float> iter_timestamp(*cloud_msg, "timestamp");
-        sensor_msgs::PointCloud2Iterator<uint8_t> iter_tag(*cloud_msg, "tag");
-        sensor_msgs::PointCloud2Iterator<uint8_t> iter_line(*cloud_msg, "line");
+        sensor_msgs::PointCloud2Iterator<uint8_t> iter_echo(*cloud_msg, "echo");
+        sensor_msgs::PointCloud2Iterator<uint8_t> iter_tag(*cloud_msg, "intensity_tag");
+        sensor_msgs::PointCloud2Iterator<uint8_t> iter_line(*cloud_msg, "space_tag");
 
         float point_timestamp_s = 0.0f;
 
@@ -828,14 +834,16 @@ namespace lidar_frame_tools
                 *iter_z = point.z / 1000.0f;
                 *iter_intensity = static_cast<float>(point.intensity);
                 *iter_timestamp = point_timestamp_s;
-                *iter_tag = point.lable & 0x0F;
-                *iter_line = (point.lable >> 4) & 0x0F;
+                *iter_echo = (point.lable >> 4) & 0x03; // bit 5:4 回波数 (0-3)
+                *iter_tag = (point.lable >> 2) & 0x03;  // bit 3:2 基于强度的点属性 (0-3)
+                *iter_line = point.lable & 0x03;        // bit 1:0 基于空间位置的点属性 (0-3)
 
                 ++iter_x;
                 ++iter_y;
                 ++iter_z;
                 ++iter_intensity;
                 ++iter_timestamp;
+                ++iter_echo;
                 ++iter_tag;
                 ++iter_line;
 

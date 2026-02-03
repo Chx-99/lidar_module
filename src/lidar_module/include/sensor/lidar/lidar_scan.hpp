@@ -60,10 +60,10 @@ namespace lidar_scanner
             RCLCPP_INFO(rclcpp::get_logger("LidarScanner"), "找到 %zu 个网络接口:", interfaces.size());
             for (const auto &[iface, ip_list] : interfaces)
             {
-                RCLCPP_INFO(rclcpp::get_logger("LidarScanner"), "  - %s:", iface.c_str());
+                RCLCPP_DEBUG(rclcpp::get_logger("LidarScanner"), "  - %s:", iface.c_str());
                 for (const auto &ip : ip_list)
                 {
-                    RCLCPP_INFO(rclcpp::get_logger("LidarScanner"), "    - %s", ip.c_str());
+                    RCLCPP_DEBUG(rclcpp::get_logger("LidarScanner"), "    - %s", ip.c_str());
                 }
             }
 

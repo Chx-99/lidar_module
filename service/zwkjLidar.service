@@ -1,0 +1,15 @@
+[Unit]
+Description=zwkj lidar node
+After=network.target 
+
+[Service]
+Type=simple
+EnvironmentFile=/home/chx/zwkj/chx/lidar_module/service/ros2_env.env
+ExecStartPre=/bin/sleep 15
+ExecStart=/home/chx/zwkj/chx/lidar_module/service/lidar_node
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

@@ -51,6 +51,7 @@ namespace lidar_base
          */
         LidarBase(const std::string lidar_ip, const std::string local_ip, const std::string sn)
             : sn_(std::move(sn)), lidar_ip_(std::move(lidar_ip)), local_ip_(std::move(local_ip)),
+              cmd_strand_(hc_io_context_.get_executor()),
               hc_work_guard_(boost::asio::make_work_guard(hc_io_context_)),
               pi_work_guard_(boost::asio::make_work_guard(pi_io_context_)),
               ack_recv_buffer_(512), pointcloud_recv_buffer_(2048), imu_recv_buffer_(1024),
@@ -58,6 +59,7 @@ namespace lidar_base
         {
             init();
             openSockets();
+            startReceiveACK();
             connect();
         }
 
@@ -78,18 +80,33 @@ namespace lidar_base
                 reconnect_timer_->cancel();
             }
 
-            // 3. 关闭所有socket，让阻塞的receive()立即返回
+            // 3. 显式取消所有 socket 上的异步操作
+            boost::system::error_code ec;
+            if (cmd_socket_ && cmd_socket_->is_open())
+            {
+                cmd_socket_->cancel(ec);
+            }
+            if (pointcloud_socket_ && pointcloud_socket_->is_open())
+            {
+                pointcloud_socket_->cancel(ec);
+            }
+            if (imu_socket_ && imu_socket_->is_open())
+            {
+                imu_socket_->cancel(ec);
+            }
+
+            // 4. 关闭所有socket，确保资源释放
             closeSockets();
 
-            // 4. 释放work_guard，让io_context可以退出
+            // 5. 释放work_guard，让io_context可以退出
             hc_work_guard_.reset();
             pi_work_guard_.reset();
 
-            // 5. 停止io_context
+            // 6. 停止io_context（不会中断正在执行的handler）
             hc_io_context_.stop();
             pi_io_context_.stop();
 
-            // 6. 等待所有线程结束
+            // 7. 等待所有线程结束（确保所有回调都执行完毕）
             for (auto &thread : io_threads_)
             {
                 if (thread.joinable())
@@ -98,12 +115,15 @@ namespace lidar_base
                 }
             }
 
-            // 7. 清空队列
+            // 8. 线程安全：此时所有异步操作已完成，可以安全清空队列
             std::pair<double, lidar_base_frame::DataFrame<lidar_base_frame::SingleEchoRectangularData, 96>> pc_item;
             while (pointcloud_queue_.try_dequeue(pc_item))
                 ;
             std::pair<double, lidar_base_frame::DataFrame<lidar_base_frame::ImuData, 1>> imu_item;
             while (imu_queue_.try_dequeue(imu_item))
+                ;
+            std::pair<uint16_t, bool> ack_item;
+            while (ack_queue_.try_dequeue(ack_item))
                 ;
         }
 
@@ -150,6 +170,8 @@ namespace lidar_base
             std::pair<double, lidar_base_frame::DataFrame<lidar_base_frame::ImuData, 1>> frame;
             if (!imu_queue_.wait_dequeue_timed(frame, timeout))
             {
+                RCLCPP_WARN(rclcpp::get_logger("lidar_base"), "[%s] getImuData 超时：超时 %ld ms",
+                            sn_.c_str(), std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count());
                 return nullptr;
             }
             return lidar_frame_tools::convertToImu(frame, sn_);
@@ -251,7 +273,6 @@ namespace lidar_base
          */
         bool sendCommand(std::span<const uint8_t> data)
         {
-
             std::lock_guard<std::mutex> lock(send_mutex_);
             try
             {
@@ -260,28 +281,36 @@ namespace lidar_base
             }
             catch (const boost::system::system_error &e)
             {
+                RCLCPP_ERROR(rclcpp::get_logger("lidar_base"), "[%s] 发送超时/失败: %s", sn_.c_str(), e.what());
+                return false;
+            }
 
-                throw std::runtime_error(("雷达设备[ " + sn_ + " ] 发送命令失败: " + std::string(e.what())).c_str());
-            }
-            try
+            // 等待ACK
+            std::pair<uint16_t, bool> ack_data;
+            if (ack_queue_.wait_dequeue_timed(ack_data, std::chrono::milliseconds(1000)))
             {
-                cmd_socket_->receive(boost::asio::buffer(ack_recv_buffer_.data(), ack_recv_buffer_.capacity()));
-                RCLCPP_DEBUG(rclcpp::get_logger("lidar_base"), ("雷达设备[ " + sn_ + " ] 接收ACK: " + GET_ACK_NAME(ack_recv_buffer_).data()).c_str());
-                return GET_ACK_RET_CODE(ack_recv_buffer_) == 0x00;
+                if (ack_data.first != GET_ACK_SETID(data))
+                {
+                    RCLCPP_ERROR(rclcpp::get_logger("lidar_base"), "[%s] 接收ACK错误: 期望 %u, 实际 %u", sn_.c_str(), GET_ACK_SETID(data), ack_data.first);
+                    return false;
+                }
+                RCLCPP_DEBUG(rclcpp::get_logger("lidar_base"), ("雷达设备[ " + sn_ + " ] 接收ACK: " + GET_ACK_NAME(data).data()).c_str());
+                return ack_data.second;
             }
-            catch (const boost::system::system_error &e)
+            else
             {
-                throw std::runtime_error(("雷达设备[ " + sn_ + " ] 接收ACK失败: " + std::string(e.what())).c_str());
+                RCLCPP_ERROR(rclcpp::get_logger("lidar_base"), "[%s] 接收ACK超时", sn_.c_str());
+                return false;
             }
         }
 
         void startReceive()
         {
-            if (is_receiving_.load(std::memory_order_acquire))
+            bool expected = false;
+            if (!is_receiving_.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
             {
-                return;
+                return; // 已经在接收中
             }
-            is_receiving_.store(true, std::memory_order_release);
             state_.store(LidarState::COLLECTING, std::memory_order_release);
             startReceivePointcloud();
             startReceiveIMU();
@@ -291,11 +320,11 @@ namespace lidar_base
          */
         void stopReceive()
         {
-            if (!is_receiving_.load(std::memory_order_acquire))
+            bool expected = true;
+            if (!is_receiving_.compare_exchange_strong(expected, false, std::memory_order_acq_rel))
             {
-                return;
+                return; // 已经停止了
             }
-            is_receiving_.store(false, std::memory_order_release);
 
             // 取消异步接收操作
             boost::system::error_code ec;
@@ -328,14 +357,21 @@ namespace lidar_base
          */
         bool connect()
         {
-            if (is_running_.load(std::memory_order_acquire))
+            bool expected = false;
+            if (!is_running_.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
             {
-                return true;
+                return true; // 已经连接了
             }
+            
+            auto guard = [this](int*) { 
+                is_running_.store(false, std::memory_order_release); 
+            };
+            std::unique_ptr<int, decltype(guard)> flag_guard(nullptr, guard);
+            
             lidar_base_frame::Frame<lidar_base_frame::HandShake> handshake_frame(local_ip_, pointcloud_port_, cmd_port_, imu_port_);
             if (sendCommand(frameToSpan(handshake_frame)))
             {
-                is_running_.store(true, std::memory_order_release);
+                flag_guard.release(); // 连接成功，不重置标志位
                 state_.store(LidarState::IDLE, std::memory_order_release);
                 startHeartbeat();
                 return true;
@@ -348,24 +384,32 @@ namespace lidar_base
          */
         bool disconnect()
         {
-            if (!is_running_.load(std::memory_order_acquire))
+            bool expected = true;
+            if (!is_running_.compare_exchange_strong(expected, false, std::memory_order_acq_rel))
             {
-                return true;
+                return true; // 已经断开了
             }
 
+            // 保存接收状态，以便失败时恢复
+            bool was_receiving = is_receiving_.load(std::memory_order_acquire);
+            
             // 先停止接收
-            if (is_receiving_.load(std::memory_order_acquire))
-            {
-                stopReceive();
-            }
+            stopReceive();
 
             lidar_base_frame::Frame<lidar_base_frame::Disconnect> disconnect_frame;
             if (sendCommand(frameToSpan(disconnect_frame)))
             {
-                is_running_.store(false, std::memory_order_release);
                 is_receiving_.store(false, std::memory_order_release);
                 state_.store(LidarState::DISCONNECTED, std::memory_order_release);
                 return true;
+            }
+            
+            // 断开失败，恢复所有标志位
+            is_running_.store(true, std::memory_order_release);
+            if (was_receiving)
+            {
+                // 尝试恢复接收状态（不保证成功）
+                startReceive();
             }
             return false;
         }
@@ -402,6 +446,29 @@ namespace lidar_base
                     startReceivePointcloud();
                 });
         }
+
+        void startReceiveACK()
+        {
+            cmd_socket_->async_receive_from(
+                boost::asio::buffer(ack_recv_buffer_.data(), ack_recv_buffer_.capacity()),
+                remote_endpoint_,
+                [this](const boost::system::error_code &ec, std::size_t)
+                {
+                    // 如果有错误或对象正在销毁，停止接收
+                    if (ec)
+                    {
+                        return;
+                    }
+
+                    std::pair<uint16_t, bool> ack_data;
+                    ack_data.first = GET_ACK_SETID(ack_recv_buffer_);
+                    ack_data.second = (GET_ACK_RET_CODE(ack_recv_buffer_) == 0x00);
+                    ack_queue_.try_enqueue(std::move(ack_data));
+
+                    startReceiveACK();
+                });
+        }
+
         void startReceiveIMU()
         {
             if (!is_receiving_.load(std::memory_order_acquire) || !is_running_.load(std::memory_order_acquire))
@@ -445,9 +512,6 @@ namespace lidar_base
                     return;
                 }
                 
-                    if (!is_running_.load(std::memory_order_acquire)) {
-                        return;
-                    }
                     lidar_base_frame::Frame<lidar_base_frame::HeartBeat> heartbeat_frame;
                     try {
                         if (sendCommand(frameToSpan(heartbeat_frame))) {
@@ -491,6 +555,8 @@ namespace lidar_base
                 try {
                     closeSockets();
                     openSockets();
+                    // 重新启动ACK接收（重连时必须重新启动）
+                    startReceiveACK();
                     if (connect()) {
                         return; // 重连成功，停止定时器
                     }
@@ -565,6 +631,7 @@ namespace lidar_base
             // std::cout << "为雷达 " << sn_ << " 分配端口: cmd=" << static_cast<int>(cmd_port_)
             //           << ", imu=" << static_cast<int>(imu_port_) << ", pointcloud=" << static_cast<int>(pointcloud_port_)
             //           << std::endl;
+
             io_threads_.emplace_back([this]()
                                      { hc_io_context_.run(); });
             io_threads_.emplace_back([this]()
@@ -573,10 +640,11 @@ namespace lidar_base
                                      { pi_io_context_.run(); });
             io_threads_.emplace_back([this]()
                                      { pi_io_context_.run(); });
-            RCLCPP_DEBUG(rclcpp::get_logger("lidar_base"), ("雷达设备[ " + sn_ + " ] 分配端口: cmd=" + 
-                std::to_string(cmd_port_) + ", imu=" + 
-                std::to_string(imu_port_) + ", pointcloud=" + 
-                std::to_string(pointcloud_port_)).c_str());
+            RCLCPP_DEBUG(rclcpp::get_logger("lidar_base"), ("雷达设备[ " + sn_ + " ] 分配端口: cmd=" +
+                                                            std::to_string(cmd_port_) + ", imu=" +
+                                                            std::to_string(imu_port_) + ", pointcloud=" +
+                                                            std::to_string(pointcloud_port_))
+                                                               .c_str());
         }
 
     protected:
@@ -590,9 +658,9 @@ namespace lidar_base
         uint16_t pointcloud_port_; // 数据端口
         uint16_t imu_port_;        // IMU端口
 
-        std::mutex send_mutex_, pointcloud_mutex_;
-        std::condition_variable pointcloud_cv_;
+        std::mutex send_mutex_;
         boost::asio::io_context hc_io_context_, pi_io_context_;
+        boost::asio::strand<boost::asio::io_context::executor_type> cmd_strand_;
         boost::asio::executor_work_guard<boost::asio::io_context::executor_type> hc_work_guard_, pi_work_guard_;
 
         boost::asio::ip::udp::endpoint remote_endpoint_;                  // 远程端点
@@ -611,6 +679,7 @@ namespace lidar_base
 
         moodycamel::BlockingConcurrentQueue<std::pair<double, lidar_base_frame::DataFrame<lidar_base_frame::SingleEchoRectangularData, 96>>> pointcloud_queue_;
         moodycamel::BlockingConcurrentQueue<std::pair<double, lidar_base_frame::DataFrame<lidar_base_frame::ImuData, 1>>> imu_queue_;
+        moodycamel::BlockingConcurrentQueue<std::pair<uint16_t, bool>> ack_queue_;
 
         // 状态
         std::atomic<LidarState> state_;
