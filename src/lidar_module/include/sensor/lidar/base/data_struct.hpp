@@ -753,12 +753,12 @@ namespace lidar_frame_tools
         }
     }
 
-    sensor_msgs::msg::PointCloud2::SharedPtr convertToPointCloud2(const std::vector<std::pair<double, lidar_base_frame::DataFrame<lidar_base_frame::SingleEchoRectangularData, 96>>> &batch, std::string &sn)
+    sensor_msgs::msg::PointCloud2::SharedPtr convertToPointCloud2(const std::vector<lidar_base_frame::DataFrame<lidar_base_frame::SingleEchoRectangularData, 96>> &batch, std::string &sn)
     {
         auto cloud_msg = std::make_shared<sensor_msgs::msg::PointCloud2>();
 
         // 使用第一帧的时间戳
-        cloud_msg->header.stamp = rclcpp::Time(static_cast<int64_t>(batch.front().first * 1e9));
+        cloud_msg->header.stamp = rclcpp::Time(static_cast<int64_t>(batch.front().timestamp));
         cloud_msg->header.frame_id = "lidar_" + sn;
 
         // 定义字段
@@ -825,9 +825,9 @@ namespace lidar_frame_tools
         float point_timestamp_s = 0.0f;
 
         // 写入点云数据
-        for (const auto &tf : batch)
+        for (const auto &frame : batch)
         {
-            for (const auto &point : tf.second.datas)
+            for (const auto &point : frame.datas)
             {
                 *iter_x = point.x / 1000.0f;
                 *iter_y = point.y / 1000.0f;
@@ -854,13 +854,13 @@ namespace lidar_frame_tools
         return cloud_msg;
     }
 
-    sensor_msgs::msg::Imu::SharedPtr convertToImu(std::pair<double, lidar_base_frame::DataFrame<lidar_base_frame::ImuData, 1>> &frame, std::string &sn)
+    sensor_msgs::msg::Imu::SharedPtr convertToImu(lidar_base_frame::DataFrame<lidar_base_frame::ImuData, 1> &frame, std::string &sn)
     {
         auto imu_msg = std::make_shared<sensor_msgs::msg::Imu>();
-        imu_msg->header.stamp = rclcpp::Time(static_cast<int64_t>(frame.first * 1e9));
+        imu_msg->header.stamp = rclcpp::Time(static_cast<int64_t>(frame.timestamp));
         imu_msg->header.frame_id = "imu_" + sn;
 
-        const auto &data = frame.second.datas[0];
+        const auto &data = frame.datas[0];
         imu_msg->linear_acceleration.x = data.acc_x;
         imu_msg->linear_acceleration.y = data.acc_y;
         imu_msg->linear_acceleration.z = data.acc_z;

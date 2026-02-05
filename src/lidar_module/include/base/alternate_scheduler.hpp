@@ -5,6 +5,8 @@
 #include <vector>
 #include <functional>
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <iomanip>
 #include <rclcpp/rclcpp.hpp>
 
@@ -52,19 +54,27 @@ public:
         RCLCPP_INFO(logger_, "调度器启动 - 相位=%d/%d, 周期=%dms", 
                     phase_index_, phase_count_, period_ms_);
         
-        // 启动调度线程
+        // 启动调度线程（事件驱动，CPU占用接近0%）
         scheduler_thread_ = std::thread([this]() {
-            RCLCPP_DEBUG(logger_, "调度器线程已启动，开始循环");
-            int tick_count = 0;
+            RCLCPP_INFO(logger_, "调度器线程已启动");
+            
             while (enabled_) {
-                tick();
-                tick_count++;
-                if (tick_count % 500 == 0) {  // 每5秒打印一次（500 * 10ms）
-                    RCLCPP_DEBUG(logger_, "调度器运行中，已执行 %d 次tick", tick_count);
+                // 计算下次切换时间点（只在切换时计算一次）
+                auto next_switch_time = calculateNextSwitchTime();
+                
+                // 精确等待，期间CPU=0%
+                std::unique_lock<std::mutex> lock(cv_mutex_);
+                if (cv_.wait_until(lock, next_switch_time, [this] { return !enabled_; })) {
+                    break; // 收到停止信号
                 }
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                
+                // 执行状态切换
+                if (enabled_) {
+                    switchDeviceAtTime();
+                }
             }
-            RCLCPP_DEBUG(logger_, "调度器线程已停止");
+            
+            RCLCPP_INFO(logger_, "调度器线程已停止");
         });
     }
 
@@ -72,15 +82,22 @@ public:
      * @brief 停止调度器
      */
     void stop() {
+        RCLCPP_INFO(logger_, "正在停止调度器...");
         enabled_ = false;
+        cv_.notify_one(); // 唤醒等待线程
+        
         if (scheduler_thread_.joinable()) {
             scheduler_thread_.join();
         }
+        
         // 确保设备关闭
         if (switch_callback_ && device_on_) {
+            RCLCPP_INFO(logger_, "关闭设备");
             switch_callback_(false);
             device_on_ = false;
         }
+        
+        RCLCPP_INFO(logger_, "调度器已停止");
     }
 
     /**
@@ -92,9 +109,47 @@ public:
 
 private:
     /**
-     * @brief 定时器触发函数，每10ms执行一次
+     * @brief 计算下次状态切换的时间点
      */
-    void tick() {
+    std::chrono::steady_clock::time_point calculateNextSwitchTime() const {
+        const int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()
+        ).count();
+
+        const int64_t period_ns = static_cast<int64_t>(period_ms_) * 1'000'000LL;
+        const int64_t elapsed = now_ns - epoch_ns_;
+
+        // 还没到时间基准点
+        if (elapsed < 0) {
+            return std::chrono::steady_clock::time_point(std::chrono::nanoseconds(epoch_ns_));
+        }
+
+        // 计算周期内位置和相位边界
+        const int64_t offset = elapsed % period_ns;
+        const int64_t seg_ns = period_ns / phase_count_;
+        const int64_t phase_start = static_cast<int64_t>(phase_index_) * seg_ns;
+        const int64_t on_ns = static_cast<int64_t>(on_ms_) * 1'000'000LL;
+        const int64_t phase_on = phase_start;
+        const int64_t phase_off = phase_start + on_ns;
+
+        // 确定下次切换时间（开启或关闭）
+        int64_t next_offset;
+        if (offset < phase_on) {
+            next_offset = phase_on;  // 等待开启
+        } else if (offset < phase_off) {
+            next_offset = phase_off; // 等待关闭
+        } else {
+            next_offset = period_ns + phase_on; // 下一周期的开启
+        }
+
+        const int64_t next_switch_ns = epoch_ns_ + (elapsed - offset + next_offset);
+        return std::chrono::steady_clock::time_point(std::chrono::nanoseconds(next_switch_ns));
+    }
+
+    /**
+     * @brief 在切换时间点执行设备开关（避免重复时间获取和计算）
+     */
+    void switchDeviceAtTime() {
         const int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now().time_since_epoch()
         ).count();
@@ -109,47 +164,20 @@ private:
 
     /**
      * @brief 判断当前时刻是否应该开启设备
-     * 
-     * 核心算法：
-     * 1. 计算从时间基准开始经过的时间
-     * 2. 对周期取模，得到当前在周期内的位置
-     * 3. 判断是否在自己的相位内
-     * 4. 在相位内再判断是否在工作时间内
      */
     bool inActiveWindow(int64_t now_ns) const {
-        if (phase_count_ <= 0 || period_ms_ <= 0) {
-            return false;
-        }
-
         const int64_t period_ns = static_cast<int64_t>(period_ms_) * 1'000'000LL;
-        const int64_t t_ns = now_ns - epoch_ns_;
+        const int64_t elapsed = now_ns - epoch_ns_;
 
-        // 还没到时间基准点
-        if (t_ns < 0) {
-            return false;
-        }
+        if (elapsed < 0) return false;
 
-        // 计算在当前周期内的位置
-        const int64_t mod = t_ns % period_ns;
-
-        // 计算每个相位的时间长度
+        const int64_t offset = elapsed % period_ns;
         const int64_t seg_ns = period_ns / phase_count_;
-        
-        // 计算本设备相位的起止时间
         const int64_t phase_start = static_cast<int64_t>(phase_index_) * seg_ns;
-        const int64_t phase_end = phase_start + seg_ns;
-
-        // 不在自己的相位内
-        if (mod < phase_start || mod >= phase_end) {
-            return false;
-        }
-
-        // 在相位内，判断是否在工作时间内
-        const int64_t offset_in_phase = mod - phase_start;
         const int64_t on_ns = static_cast<int64_t>(on_ms_) * 1'000'000LL;
 
-        // [0, on_ns) 为工作区，其余为保护区
-        return offset_in_phase < on_ns;
+        // 在自己相位内且在工作时间内
+        return (offset >= phase_start) && (offset < phase_start + on_ns);
     }
 
     /**
@@ -178,5 +206,7 @@ private:
     
     std::function<void(bool)> switch_callback_;
     std::thread scheduler_thread_;
-    rclcpp::Logger logger_;     // ROS日志对象
+    std::condition_variable cv_;    // 条件变量，用于精确等待
+    std::mutex cv_mutex_;           // 条件变量的互斥锁
+    rclcpp::Logger logger_;         // ROS日志对象
 };

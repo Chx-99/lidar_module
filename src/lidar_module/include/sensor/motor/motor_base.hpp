@@ -131,12 +131,13 @@ namespace motor_base
 
             // std::cout << "[moveAbsoluteAndWait] 预估时间: " << estimated_time << " 秒" << std::endl;
 
-            // 6. 先等待预估时间的一半，然后开始轮询
+            // 6. 先等待预估时间的80%，然后开始轮询（减少轮询次数）
             auto start_time = std::chrono::steady_clock::now();
-            std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(estimated_time * 500)));
+            std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(estimated_time * 800)));
 
-            // 7. 轮询检查是否到达
-            const int poll_interval_ms = 100; // 100ms轮询一次
+            // 7. 轮询检查是否到达（使用自适应轮询间隔）
+            int poll_interval_ms = 200; // 初始200ms轮询一次（从100ms增加到200ms）
+            int poll_count = 0;
             while (true)
             {
                 // 检查超时
@@ -165,6 +166,16 @@ namespace motor_base
                     return true;
                 }
 
+                // 自适应调整轮询间隔：误差越大，等待越久
+                poll_count++;
+                if (current_error > 10.0) {
+                    poll_interval_ms = 500; // 误差大，降低轮询频率
+                } else if (current_error > 2.0) {
+                    poll_interval_ms = 200;
+                } else {
+                    poll_interval_ms = 100; // 接近目标，提高轮询频率
+                }
+                
                 // 继续等待
                 std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
             }
