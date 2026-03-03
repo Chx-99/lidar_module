@@ -273,6 +273,7 @@ namespace lidar_creator
             {
                 const auto& lidar = item["lidar"];
                 lidar_cfg.accumulated_frames = lidar.value("accumulated_frames", 2500);
+                lidar_cfg.repetitive_scan = lidar.value("repetitive_scan", false);
             }
 
             // 解析滤波器配置
@@ -305,9 +306,12 @@ namespace lidar_creator
             {
                 const auto& lidar = item["lidar"];
                 lidar_cfg.accumulated_frames = lidar.value("accumulated_frames", 2500);
+                lidar_cfg.repetitive_scan = lidar.value("repetitive_scan", false);
                 lidar_cfg.angle_segments = lidar.value("angle_segments", 6);
                 lidar_cfg.motor_offset_y_angle = lidar.value("motor_offset_y_angle", 37.5f);
-                lidar_cfg.motor_bias_z_distance = lidar.value("motor_bias_z_distance", 0.0f);
+                lidar_cfg.motor_bias_z_distance = lidar.value("motor_bias_z_distance", 0.01f);
+                lidar_cfg.motor_bias_x_distance = lidar.value("motor_bias_x_distance", 0.001f);
+
             }
 
             // 解析电机配置
@@ -341,6 +345,9 @@ namespace lidar_creator
                 motor_cfg.byte_order = (byte_order_str == "big_endian") 
                                       ? ByteOrder::BigEndian 
                                       : ByteOrder::LittleEndian;
+
+                motor_cfg.motor_speed_rpm = motor.value("motor_speed_rpm", 5.0f);
+                motor_cfg.motor_acceleration_rpm_s = motor.value("motor_acceleration_rpm_s", 1.0f);
 
                 if (motor_cfg.comm_type == "rtu")
                 {

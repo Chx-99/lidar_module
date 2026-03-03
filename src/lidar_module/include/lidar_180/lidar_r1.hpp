@@ -192,7 +192,7 @@ private:
         // 移动电机到目标角度
         double deviation = 0.0;
         if (!motor_->moveAbsoluteAndWait(target_angle, deviation, 
-                                         MOTOR_SPEED, MOTOR_ACCEL, POSITION_TOLERANCE))
+                                         motor_config_.motor_speed_rpm, motor_config_.motor_acceleration_rpm_s, POSITION_TOLERANCE))
         {
             RCLCPP_ERROR(this->get_logger(), "[%s] 电机移动到 %.2f° 失败", 
                         lidar_config_.sn.c_str(), target_angle);
@@ -221,7 +221,7 @@ private:
             }
             
             // 采集点云数据
-            auto cloud_msg = lidar_->getPointcloudData(lidar_config_.accumulated_frames);
+            auto cloud_msg = lidar_->getPointcloudData();
             if (!cloud_msg)
             {
                 RCLCPP_ERROR(this->get_logger(), "[%s] 获取点云数据失败", 
@@ -233,6 +233,9 @@ private:
 
             // 坐标变换并累积
             transformAndAccumulatePointCloud(cloud_msg, current_angle);
+
+            // publishPointCloud(accumulated_pointcloud_); // 实时发布当前累积点云（可选）
+            
             return true;
         }
         catch (const std::exception &e)
@@ -311,7 +314,8 @@ private:
      * 变换顺序：
      * 1. 绕Y轴旋转（电机偏移角）
      * 2. 沿Z轴平移（电机偏移距离）
-     * 3. 绕X轴旋转（当前扫描角度）
+     * 3. 沿X轴平移（电机偏移距离）
+     * 4. 绕X轴旋转（当前扫描角度）
      */
     [[nodiscard]] Eigen::Matrix4f computeTransformMatrix(double angle_deg) const
     {
@@ -326,11 +330,16 @@ private:
         R_y(0, 0) =  cos_y; R_y(0, 2) =  sin_y;
         R_y(2, 0) = -sin_y; R_y(2, 2) =  cos_y;
 
-        // 2. Z轴平移矩阵
+        // 2 Z轴平移矩阵 
         Eigen::Matrix4f T_z = Eigen::Matrix4f::Identity();
         T_z(2, 3) = static_cast<float>(lidar_config_.motor_bias_z_distance.value());
+        // 3. X轴平移矩阵（电机偏移X距离）
+        Eigen::Matrix4f T_x = Eigen::Matrix4f::Identity();
+        T_x(0, 3) = static_cast<float>(lidar_config_.motor_bias_x_distance.value());
 
-        // 3. X轴旋转矩阵
+        
+
+        // 4. X轴旋转矩阵
         const double x_rad = angle_deg * pi / 180.0;
         const float cos_x = static_cast<float>(std::cos(x_rad));
         const float sin_x = static_cast<float>(std::sin(x_rad));
@@ -339,8 +348,8 @@ private:
         R_x(1, 1) =  cos_x; R_x(1, 2) = -sin_x;
         R_x(2, 1) =  sin_x; R_x(2, 2) =  cos_x;
 
-        // 组合变换：R_x * T_z * R_y
-        return R_x * T_z * R_y;
+        // 组合变换：R_x * T_x * T_z * R_y
+        return R_x * T_x * T_z * R_y;
     }
 
     // ==================== 发布相关 ====================
@@ -366,20 +375,34 @@ private:
         RCLCPP_INFO(this->get_logger(), "[%s] 开始处理点云，原始点数: %zu",
                    lidar_config_.sn.c_str(), accumulated_pointcloud_->size());
 
+        // // 测试点云，保存原始数据以便调试 /opt/zwkj/data/test/ sn + 时间戳.pcd (需要递归检查目录是否存在)
+        // {
+        //     auto filename = "/opt/zwkj/data/test/" + lidar_config_.sn + "_" + std::to_string(std::time(nullptr)) + ".pcd";
+        //     // 递归检查目录是否存在，如果不存在则创建
+        //     std::filesystem::path dir("/opt/zwkj/data/test/");
+        //     if (!std::filesystem::exists(dir)) {
+        //         std::filesystem::create_directories(dir);
+        //     }
+
+        //     pcl::io::savePCDFileBinary(filename, *accumulated_pointcloud_);
+        //     RCLCPP_INFO(this->get_logger(), "[%s] 保存原始点云到文件: %s", 
+        //                lidar_config_.sn.c_str(), filename.c_str());
+        // }
+
         // 1. 应用直通滤波
         auto passthrough_filtered = applyPassThroughFilter(accumulated_pointcloud_);
         
+            // 3. 应用世界坐标变换
+        auto world_cloud = transformToWorld(passthrough_filtered);
+
         // 2. 应用体素滤波
-        auto voxel_filtered = applyVoxelFilter(passthrough_filtered);
+        auto voxel_filtered = applyVoxelFilter(world_cloud);
 
-        // 3. 应用世界坐标变换
-        auto world_cloud = transformToWorld(voxel_filtered);
-
-        // 4. 发布
-        publishPointCloud(world_cloud);
+        // 4. 发布·
+        publishPointCloud(voxel_filtered);
 
         RCLCPP_INFO(this->get_logger(), "[%s] 点云发布完成，最终点数: %zu", 
-                   lidar_config_.sn.c_str(), world_cloud->size());
+                   lidar_config_.sn.c_str(), voxel_filtered->size());
     }
 
     /**
@@ -460,9 +483,6 @@ private:
 
     static constexpr int LASER_RETRY_COUNT = 3;       // 激光操作重试次数
     static constexpr double POSITION_TOLERANCE = 0.5; // 位置到达容差（度）
-    static constexpr double MOTOR_SPEED = 5.0;        // 电机速度（RPM）
-    static constexpr double MOTOR_ACCEL = 1.0;        // 电机加速度（RPM/s）
-
     // ==================== 成员变量 ====================
 
     // 配置参数（从 lidar_config_ 提取）

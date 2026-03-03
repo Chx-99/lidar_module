@@ -11,6 +11,8 @@ int main(int argc, char **argv)
     // 初始化 ROS2
     rclcpp::init(argc, argv);
     auto lidar_creator = lidar_creator::LidarCreator("/opt/zwkj/configs/lidar_config.json", 3, 55000);
+    // auto lidar_creator = lidar_creator::LidarCreator("/home/zwkj01/lidar_config.json", 3, 55000);
+
     auto lidar_nodes = lidar_creator.scanAndCreateAll();
     if (lidar_nodes.empty())
     {

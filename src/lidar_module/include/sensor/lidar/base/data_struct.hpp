@@ -623,6 +623,34 @@ namespace lidar_base_frame
         }
     };
 
+  
+    /**
+     * 写设备参数
+     */
+    struct WriteDeviceParam
+    {
+        uint8_t cmd_set = 0x00;
+        uint8_t cmd_id = 0x0B;
+        uint16_t key;
+        uint16_t length;
+        uint8_t value;
+
+        WriteDeviceParam(uint16_t key, uint16_t length, uint8_t value) : key(key), length(length), value(value) {}
+
+        inline friend std::ostream &operator<<(std::ostream &os, const WriteDeviceParam &msg)
+        {
+            std::ostringstream oss;
+            oss << std::hex << std::uppercase << std::setfill('0');
+            oss << "cmd_set: 0x" << static_cast<int>(msg.cmd_set) << "\n";
+            oss << "cmd_id: 0x" << static_cast<int>(msg.cmd_id) << "\n";
+            oss << "key: 0x" << static_cast<int>(msg.key) << "\n";
+            oss << "length: 0x" << static_cast<int>(msg.length) << "\n";
+            oss << "value: 0x" << static_cast<int>(msg.value) << "\n";
+            os << oss.str();
+            return os;
+        }
+    };
+
     /*
         传感器数据基础帧协议
     */
@@ -829,6 +857,14 @@ namespace lidar_frame_tools
         {
             for (const auto &point : frame.datas)
             {
+                
+
+                if ((point.x == 0 && point.y == 0 && point.z == 0) || ((point.lable >> 2) & 0x03) > 0x02)
+                {
+                    point_timestamp_s += 10 * 1e-6f; // 10微秒
+                    continue; // 跳过无效点
+                }
+
                 *iter_x = point.x / 1000.0f;
                 *iter_y = point.y / 1000.0f;
                 *iter_z = point.z / 1000.0f;
@@ -846,8 +882,8 @@ namespace lidar_frame_tools
                 ++iter_echo;
                 ++iter_tag;
                 ++iter_line;
-
                 point_timestamp_s += 10 * 1e-6f; // 10微秒
+                
             }
         }
 

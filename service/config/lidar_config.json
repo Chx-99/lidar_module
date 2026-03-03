@@ -1,0 +1,192 @@
+{
+    "lidar180": [
+        [
+            {
+                "sn": "BAD8I539",
+                "motor": {
+                    "comm_type": "rtu",
+                    "byte_order": "big_endian",
+                    "slave_id": 1,
+                    "serial_port": "/dev/ttyUSB0"
+                },
+                "lidar": {
+                    "accumulated_frames": 2500,
+                    "angle_segments": 6,
+                    "motor_offset_y_angle": 37.25,
+                    "motor_bias_z_distance" : 1e-6,
+                    "motor_bias_x_distance" : -1e-6
+                },
+                "filter": {
+                    "transform_to_world" : [
+                        [1, 0, 0, 0],
+                        [0, 1, 0, 0],
+                        [0, 0, 1, 0],
+                        [0, 0, 0, 1]
+                    ],
+                    "voxel_size": 0.05,
+                    "passthrough" :[
+                        {"field_name": "z", "limits": [0.0, 3.0]},
+                        {"field_name": "y", "limits": [-2.0, 2.0]},
+                        {"field_name": "x", "limits": [-2.0, 2.0]}
+                    ]
+                }
+            }
+        ],
+        [
+            {
+                "sn": "BXXXXX19",
+                "motor": {
+                    "comm_type": "tcp",
+                    "byte_order": "big_endian",
+                    "slave_id": 1,
+                    "motor_ip": "192.168.1.140",
+                    "network_port": 8080
+                },
+                "lidar": {
+                    "accumulated_frames": 2500,
+                    "angle_segments": 6,
+                    "motor_offset_y_angle": 37.25,
+                    "motor_bias_z_distance" : 1e-6,
+                    "motor_bias_x_distance" : -1e-6
+                },
+                "filter": {
+                    "transform_to_world" : [
+                        [1, 0, 0, 0],
+                        [0, 1, 0, 0],
+                        [0, 0, 1, 0],
+                        [0, 0, 0, 1]
+                    ],
+                    "voxel_size": 0.05,
+                    "passthrough" :[
+                        {"field_name": "z", "limits": [0.0, 3.0]},
+                        {"field_name": "y", "limits": [-2.0, 2.0]},
+                        {"field_name": "x", "limits": [-2.0, 2.0]}
+                    ]
+                }
+            },
+            {
+                "sn": "BXXXXX29",
+                "motor": {
+                    "comm_type": "ttw",
+                    "byte_order": "big_endian",
+                    "slave_id": 1,
+                    "motor_ip": "192.168.1.141",
+                    "network_port": 8080
+                },
+                "lidar": {
+                    "accumulated_frames": 2500,
+                    "angle_segments": 6,
+                    "motor_offset_y_angle": 37.25,
+                    "motor_bias_z_distance" : 1e-6,
+                    "motor_bias_x_distance" : -1e-6
+                },
+                "filter": {
+                    "transform_to_world" : [
+                        [1, 0, 0, 0],
+                        [0, 1, 0, 0],
+                        [0, 0, 1, 0],
+                        [0, 0, 0, 1]
+                    ],
+                    "voxel_size": 0.05,
+                    "passthrough" :[
+                        {"field_name": "z", "limits": [0.0, 3.0]},
+                        {"field_name": "y", "limits": [-2.0, 2.0]},
+                        {"field_name": "x", "limits": [-2.0, 2.0]}
+                    ]
+                }
+            }
+        ]
+    ],
+    "lidar80": [
+        [
+            {
+                "sn": "BAWSLAI9",  
+                "lidar": {
+                        "accumulated_frames": 2500
+                    },
+                    "filter": {
+                        "transform_to_world" : [
+                            [1, 0, 0, 0],
+                            [0, 1, 0, 0],
+                            [0, 0, 1, 0],
+                            [0, 0, 0, 1]
+                        ],
+                        "voxel_size": 0.05,
+                        "passthrough" :[
+                            {"field_name": "z", "limits": [0.0, 3.0]},
+                            {"field_name": "y", "limits": [-2.0, 2.0]},
+                            {"field_name": "x", "limits": [-2.0, 2.0]}
+                        ]
+                    }
+            },
+            {
+                "sn": "BA06JD49",
+                "lidar": {
+                        "accumulated_frames": 2500
+                    },
+                    "filter": {
+                        "transform_to_world" : [
+                            [1, 0, 0, 0],
+                            [0, 1, 0, 0],
+                            [0, 0, 1, 0],
+                            [0, 0, 0, 1]
+                        ],
+                        "voxel_size": 0.05,
+                        "passthrough" :[
+                            {"field_name": "z", "limits": [0.0, 3.0]},
+                            {"field_name": "y", "limits": [-2.0, 2.0]},
+                            {"field_name": "x", "limits": [-2.0, 2.0]}
+                        ]
+                    }
+            }
+        ],
+        [
+            {
+                "sn": "BA37KB59",
+                "lidar": {
+                        "accumulated_frames": 2500
+                    },
+                    "filter": {
+                        "transform_to_world" : [
+                            [1, 0, 0, 0],
+                            [0, 1, 0, 0],
+                            [0, 0, 1, 0],
+                            [0, 0, 0, 1]
+                        ],
+                        "voxel_size": 0.05,
+                        "passthrough" :[
+                            {"field_name": "z", "limits": [0.0, 3.0]},
+                            {"field_name": "y", "limits": [-2.0, 2.0]},
+                            {"field_name": "x", "limits": [-2.0, 2.0]}
+                        ]
+                    }
+            },
+            {
+                "sn": "BAY88999",
+                "lidar": {
+                        "accumulated_frames": 2500
+                    },
+                    "filter": {
+                        "transform_to_world" : [
+                            [1, 0, 0, 0],
+                            [0, 1, 0, 0],
+                            [0, 0, 1, 0],
+                            [0, 0, 0, 1]
+                        ],
+                        "voxel_size": 0.05,
+                        "passthrough" :[
+                            {"field_name": "z", "limits": [0.0, 3.0]},
+                            {"field_name": "y", "limits": [-2.0, 2.0]},
+                            {"field_name": "x", "limits": [-2.0, 2.0]}
+                        ]
+                    }
+            }
+        ]
+    ],
+    "alt":{
+        "enable": true,
+        "on_ms": 35000,
+        "guard_ms": 5000,
+        "start_delay_ms": 0
+    }
+}

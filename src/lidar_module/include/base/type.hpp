@@ -34,6 +34,9 @@ struct MotorConfig
     ByteOrder byte_order = ByteOrder::BigEndian; // 字节序
     uint8_t slave_id = 1;                        // Modbus从站ID
 
+    float motor_speed_rpm = 5.0f;              // 电机转速（RPM）
+    float motor_acceleration_rpm_s = 1.0f;     // 电机加速度（RPM/s）
+
     // RTU 串口配置（comm_type == "rtu" 时需要）
     std::optional<std::string> serial_port; // 串口名称
     std::optional<uint32_t> baudrate;       // 波特率（默认9600）
@@ -58,11 +61,13 @@ struct LidarConfig
 
     // 雷达采集参数
     size_t accumulated_frames = 2500; // 累积帧数
+    bool repetitive_scan = false; // 是否启用重复扫描机制
 
     // 180度雷达特有参数
     std::optional<size_t> angle_segments;       // 角度分段数
     std::optional<float> motor_offset_y_angle;  // 电机Y轴偏移角度
     std::optional<float> motor_bias_z_distance; // 电机Z轴偏移距离
+    std::optional<float> motor_bias_x_distance; // 电机X轴偏移距离
 };
 
 /**

@@ -158,7 +158,9 @@ private:
      */
     void initDevices()
     {
-        lidar_ = std::make_unique<lidar_base::LidarBase>(lidar_config_.lidar_ip, lidar_config_.local_ip, lidar_config_.sn);
+        lidar_ = std::make_unique<lidar_base::LidarBase>(lidar_config_.lidar_ip, lidar_config_.local_ip, 
+                                                         lidar_config_.sn, lidar_config_.accumulated_frames,
+                                                         lidar_config_.repetitive_scan);
         if (lidar_config_.type == LidarType::LIDAR_R1)
         {
             // 根据配置创建电机对象

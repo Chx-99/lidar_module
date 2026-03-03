@@ -143,7 +143,7 @@ private:
                     lidar_config_.sn.c_str());
 
         // 采集点云数据
-        auto cloud_msg = lidar_->getPointcloudData(lidar_config_.accumulated_frames);
+        auto cloud_msg = lidar_->getPointcloudData();
         if (!cloud_msg)
         {
             RCLCPP_ERROR(this->get_logger(), "[%s] 获取点云数据失败", 
@@ -277,6 +277,11 @@ private:
      */
     void publishPointCloud(const pcl::PointCloud<pcl::PointXYZI>::Ptr &cloud)
     {
+        //测试保存pcd文件 /home/zwkj01/sn_+时间戳.pcd
+        // std::string filename = "/home/zwkj01/sn_" + lidar_config_.sn + "_" + std::to_string(this->now().nanoseconds()) + ".pcd";
+        // pcl::io::savePCDFileBinary(filename, *cloud);
+        // RCLCPP_INFO(this->get_logger(), "[%s] 点云已保存到: %s", lidar_config_.sn.c_str(), filename.c_str());
+
         auto msg = std::make_shared<sensor_msgs::msg::PointCloud2>();
         pcl::toROSMsg(*cloud, *msg);
         msg->header.frame_id = "map";
