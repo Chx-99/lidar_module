@@ -144,6 +144,20 @@ private:
 
         // 采集点云数据
         auto cloud_msg = lidar_->getPointcloudData();
+        
+
+
+        if (!lidar_->disableLaser(LASER_RETRY_COUNT))
+        {
+            RCLCPP_ERROR(this->get_logger(), "[%s] 激光关闭失败", 
+                        lidar_config_.sn.c_str());
+        }
+        else
+        {
+            RCLCPP_DEBUG(this->get_logger(), "[%s] 激光已关闭", 
+                        lidar_config_.sn.c_str());
+        }
+
         if (!cloud_msg)
         {
             RCLCPP_ERROR(this->get_logger(), "[%s] 获取点云数据失败", 
@@ -151,20 +165,6 @@ private:
             return nullptr;
         }
 
-        // 使用 lambda + unique_ptr 实现 RAII，确保激光关闭
-        auto laser_cleanup = [this](int*) {
-            if (!lidar_->disableLaser(LASER_RETRY_COUNT))
-            {
-                RCLCPP_ERROR(this->get_logger(), "[%s] 激光关闭失败", 
-                            lidar_config_.sn.c_str());
-            }
-            else
-            {
-                RCLCPP_DEBUG(this->get_logger(), "[%s] 激光已关闭", 
-                            lidar_config_.sn.c_str());
-            }
-        };
-        std::unique_ptr<int, decltype(laser_cleanup)> laser_guard(nullptr, laser_cleanup);
 
         RCLCPP_DEBUG(this->get_logger(), "[%s] 采集到 %zu 个点", 
                     lidar_config_.sn.c_str(), 

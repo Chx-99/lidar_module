@@ -182,13 +182,10 @@ namespace lidar_base
             {
                 return false;
             }
-            
             Frame<SetLaserStatus> frame(0x01);
             for (int retry = 0; retry < retry_count; retry++)
             {
-                
-                sendCommand(frameToSpan(frame));
-                if (wait_and_get_ack(GET_ACK_SETID(frameToSpan(frame)), std::chrono::seconds(5)))
+                if (sendCommandAndWaitAck(frameToSpan(frame), GET_ACK_SETID(frameToSpan(frame)), std::chrono::seconds(5)))
                 {
                     startReceive();
                     return true;
@@ -209,8 +206,7 @@ namespace lidar_base
             Frame<SetLaserStatus> frame(0x00);
             for (int retry = 0; retry < retry_count; retry++)
             {
-                sendCommand(frameToSpan(frame));
-                if (wait_and_get_ack(GET_ACK_SETID(frameToSpan(frame)), std::chrono::seconds(5)))
+                if (sendCommandAndWaitAck(frameToSpan(frame), GET_ACK_SETID(frameToSpan(frame)), std::chrono::seconds(5)))
                 {
                     stopReceive();
                     return true;
@@ -231,8 +227,7 @@ namespace lidar_base
             Frame<SetIMUFrequency> frame(0x01);
             for (int retry = 0; retry < retry_count; retry++)
             {
-                sendCommand(frameToSpan(frame));
-                if (wait_and_get_ack(GET_ACK_SETID(frameToSpan(frame)), std::chrono::seconds(5)))
+                if (sendCommandAndWaitAck(frameToSpan(frame), GET_ACK_SETID(frameToSpan(frame)), std::chrono::seconds(5)))
                 {
                     return true;
                 }
@@ -252,8 +247,7 @@ namespace lidar_base
             Frame<SetIMUFrequency> frame(0x00);
             for (int retry = 0; retry < retry_count; retry++)
             {
-                sendCommand(frameToSpan(frame));
-                if (wait_and_get_ack(GET_ACK_SETID(frameToSpan(frame)), std::chrono::seconds(5)))
+                if (sendCommandAndWaitAck(frameToSpan(frame), GET_ACK_SETID(frameToSpan(frame)), std::chrono::seconds(5)))
                 {
                     return true;
                 }
@@ -270,22 +264,34 @@ namespace lidar_base
             std::lock_guard<std::mutex> lock(send_mutex_);
             try
             {
-                cmd_socket_->async_send_to(boost::asio::buffer(data.data(), data.size()), sender_endpoint_, [](const boost::system::error_code &ec, size_t bytes_transferred)
-                {
+                cmd_socket_->async_send_to(boost::asio::buffer(data.data(), data.size()), sender_endpoint_, [&](const boost::system::error_code &ec, size_t)
+                                           {
                     if (ec)
                     {
-                        RCLCPP_ERROR(rclcpp::get_logger("lidar_base"), "发送超时/失败: %s", ec.message().c_str());
+                        RCLCPP_ERROR(rclcpp::get_logger("lidar_base"), "[%s] 发送超时/失败: %s", sn_.c_str(), ec.message().c_str());
                     }
                     else{
-                        RCLCPP_DEBUG(rclcpp::get_logger("lidar_base"), "发送命令成功, 字节数: %zu", bytes_transferred);
-                    }
-                });
+                        RCLCPP_DEBUG(rclcpp::get_logger("lidar_base"), "[%s] 发送命令成功, 命令: %s", sn_.c_str(), std::string(GET_ACK_NAME(data)).c_str());
+                    } });
             }
             catch (const boost::system::system_error &e)
             {
                 RCLCPP_ERROR(rclcpp::get_logger("lidar_base"), "[%s] 发送超时/失败: %s", sn_.c_str(), e.what());
             }
         }
+
+        /**
+         * @brief 串行发送命令并等待ACK
+         * 该函数保证同一时刻只有一个命令在发送和等待ACK，防止ACK归属混乱。
+         */
+        bool sendCommandAndWaitAck(std::span<const uint8_t> data, uint16_t set_id, std::chrono::seconds timeout)
+        {
+            std::lock_guard<std::mutex> sync_lock(sync_cmd_mutex_);
+            sendCommand(data);
+            return wait_and_get_ack(set_id, timeout);
+        }
+
+
 
         void startReceive()
         {
@@ -342,8 +348,7 @@ namespace lidar_base
             receive_ack();
 
             Frame<HandShake> handshake_frame(local_ip_, pointcloud_port_, cmd_port_, imu_port_);
-            sendCommand(frameToSpan(handshake_frame));
-            if (wait_and_get_ack(GET_ACK_SETID(frameToSpan(handshake_frame)), std::chrono::seconds(5)))
+            if (sendCommandAndWaitAck(frameToSpan(handshake_frame), GET_ACK_SETID(frameToSpan(handshake_frame)), std::chrono::seconds(5)))
             {
                 // Frame<WriteDeviceParam> write_id_frame(0x02, 0x01, 0x00);
                 // if (repetitive_scan_){
@@ -382,8 +387,7 @@ namespace lidar_base
             stopReceive();
 
             Frame<Disconnect> disconnect_frame;
-            sendCommand(frameToSpan(disconnect_frame));
-            if (wait_and_get_ack(GET_ACK_SETID(frameToSpan(disconnect_frame)), std::chrono::seconds(5)))
+            if (sendCommandAndWaitAck(frameToSpan(disconnect_frame), GET_ACK_SETID(frameToSpan(disconnect_frame)), std::chrono::seconds(5)))
             {
                 state_.store(LidarState::DISCONNECTED, std::memory_order_release);
                 return true;
@@ -404,7 +408,7 @@ namespace lidar_base
                                                 {
                                                     return;
                                                 }
-
+                                                RCLCPP_DEBUG(rclcpp::get_logger("lidar_base"), "[%s] 接收到ACK回应， ACK: %s", sn_.c_str(), std::string(GET_ACK_NAME(ack_recv_buffer_)).c_str());
                                                 uint16_t ack_set_id = GET_ACK_SETID(ack_recv_buffer_);
                                                 bool ack_ret = (GET_ACK_RET_CODE(ack_recv_buffer_) == 0x00);
                                                 {
@@ -436,10 +440,6 @@ namespace lidar_base
                                                            {
                                                                RCLCPP_WARN(rclcpp::get_logger("lidar_base"), "[%s] pointcloud_queue丢弃一帧点云", sn_.c_str());
                                                            }
-                                                           else{
-                                                                RCLCPP_DEBUG(rclcpp::get_logger("lidar_base"), "[%s] 接收点云数据包: %zu bytes", sn_.c_str(), bytes_transferred);
-                                                           }
-                                                           
                                                        }
                                                        receive_pointcloud();
                                                    });
@@ -482,14 +482,12 @@ namespace lidar_base
                                             try
                                             {
                                                 Frame<HeartBeat> heartbeat_frame;
-                                                sendCommand(frameToSpan(heartbeat_frame));
-                                                if (wait_and_get_ack(GET_ACK_SETID(frameToSpan(heartbeat_frame)), std::chrono::seconds(10)))
+                                                if (sendCommandAndWaitAck(frameToSpan(heartbeat_frame), GET_ACK_SETID(frameToSpan(heartbeat_frame)), std::chrono::seconds(20)))
                                                 {
                                                     heartbeat();
                                                 }
                                                 else
                                                 {
-
                                                     reconnect();
                                                     return;
                                                 }
@@ -639,14 +637,15 @@ namespace lidar_base
         uint16_t pointcloud_port_; // 数据端口
         uint16_t imu_port_;        // IMU端口
 
-        size_t package_num_;       // 每帧点云包含的数据包数量
+        size_t package_num_;   // 每帧点云包含的数据包数量
         bool repetitive_scan_; // 是否重复扫描
 
         std::mutex ack_mutex_, send_mutex_; // 互斥锁
+        std::mutex sync_cmd_mutex_; // 串行命令互斥锁
         std::condition_variable ack_cv_;    // 条件变量
 
         boost::asio::io_context base_io_context_, ack_io_context_, receive_io_context_;                                                  // 心跳和重连使用base_io_context_，数据接收使用receive_io_context_
-        boost::asio::strand<boost::asio::io_context::executor_type> base_strand_, ack_strand_;                                       // 用于保护心跳和重连相关的状态
+        boost::asio::strand<boost::asio::io_context::executor_type> base_strand_, ack_strand_;                                           // 用于保护心跳和重连相关的状态
         boost::asio::executor_work_guard<boost::asio::io_context::executor_type> base_work_guard_, ack_work_guard_, receive_work_guard_; // 用于保持io_context运行
 
         boost::asio::ip::udp::endpoint remote_endpoint_;                  // 远程端点

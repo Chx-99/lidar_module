@@ -234,7 +234,7 @@ private:
             // 坐标变换并累积
             transformAndAccumulatePointCloud(cloud_msg, current_angle);
 
-            // publishPointCloud(accumulated_pointcloud_); // 实时发布当前累积点云（可选）
+            publishPointCloud(accumulated_pointcloud_); // 实时发布当前累积点云（可选）
             
             return true;
         }
