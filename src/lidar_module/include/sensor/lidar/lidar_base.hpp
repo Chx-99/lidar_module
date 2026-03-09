@@ -261,7 +261,6 @@ namespace lidar_base
          */
         void sendCommand(std::span<const uint8_t> data)
         {
-            std::lock_guard<std::mutex> lock(send_mutex_);
             try
             {
                 cmd_socket_->async_send_to(boost::asio::buffer(data.data(), data.size()), sender_endpoint_, [&](const boost::system::error_code &ec, size_t)
@@ -286,7 +285,7 @@ namespace lidar_base
          */
         bool sendCommandAndWaitAck(std::span<const uint8_t> data, uint16_t set_id, std::chrono::seconds timeout)
         {
-            std::lock_guard<std::mutex> sync_lock(sync_cmd_mutex_);
+            std::lock_guard<std::mutex> sync_lock(send_mutex_);
             sendCommand(data);
             return wait_and_get_ack(set_id, timeout);
         }
@@ -640,8 +639,8 @@ namespace lidar_base
         size_t package_num_;   // 每帧点云包含的数据包数量
         bool repetitive_scan_; // 是否重复扫描
 
-        std::mutex ack_mutex_, send_mutex_; // 互斥锁
-        std::mutex sync_cmd_mutex_; // 串行命令互斥锁
+        std::mutex ack_mutex_;
+        std::mutex send_mutex_; 
         std::condition_variable ack_cv_;    // 条件变量
 
         boost::asio::io_context base_io_context_, ack_io_context_, receive_io_context_;                                                  // 心跳和重连使用base_io_context_，数据接收使用receive_io_context_
